@@ -4,7 +4,7 @@ import { useGame } from "@/lib/game-context"
 import { User, Lock, Unlock, Eye, Clock, Target } from "lucide-react"
 
 const scheduleItems = [
-  { id: 1, time: "09:00", label: "Morning Photoshoot", location: "Siam Paragon Studio B" },
+  { id: 1, time: "09:00", label: "Morning Photoshoot", location: "Siam Paragon Studio A" },
   { id: 2, time: "14:00", label: "Recording Session", location: "GMM Studio" },
   {
     id: 3,
