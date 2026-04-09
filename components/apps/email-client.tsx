@@ -78,7 +78,8 @@ export function EmailClient() {
           triggerAriaResponse(2, success)
         } else if (currentStage === 4) {
           const vendorContent = localStorage.getItem("larbos_vendor_content") || ""
-          success = validateStage4(vendorContent)
+          const urlLooksVendor = newEmail.url.toLowerCase().includes("vendor.dailyfresh.menu")
+          success = urlLooksVendor && validateStage4(vendorContent)
           triggerAriaResponse(4, success)
         }
       } else if (attachmentType === "txt" && savedTxt?.content) {
