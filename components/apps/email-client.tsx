@@ -2,13 +2,16 @@
 
 import { useState } from "react"
 import { useGame } from "@/lib/game-context"
+import type { DifyAriaResult } from "@/lib/dify-aria"
 import { Send, Inbox, FileText, Plus, Paperclip, Trash2, Link2, Bell, FileCode2 } from "lucide-react"
 
 export function EmailClient() {
   const { 
     emails, 
     addEmail, 
+    addTerminalLog,
     markEmailRead, 
+    markEmailSubmitted,
     validateStage1, 
     validateStage2,
     validateStage3,
@@ -27,6 +30,7 @@ export function EmailClient() {
   const [attachmentType, setAttachmentType] = useState<"pdf" | "txt" | "url">("pdf")
   const [savedPdfMetadata, setSavedPdfMetadata] = useState<{ author: string; title: string; keywords: string } | null>(null)
   const [savedTxt, setSavedTxt] = useState<{ name: string; content: string } | null>(null)
+  const [isSendingAria, setIsSendingAria] = useState(false)
 
   const inboxEmails = emails.filter((e) => !e.isSent)
   const sentEmails = emails.filter((e) => e.isSent)
@@ -47,7 +51,50 @@ export function EmailClient() {
     if (name && content) setSavedTxt({ name, content })
   }
 
-  const handleSend = () => {
+  const getStagePayload = () => {
+    if (attachmentType === "pdf" && savedPdfMetadata) {
+      return {
+        stage: 1,
+        sourceType: "PDF Metadata",
+        payloadContent: JSON.stringify(savedPdfMetadata),
+        localSuccess: validateStage1(savedPdfMetadata),
+      }
+    }
+
+    if (attachmentType === "url" && newEmail.url && currentStage === 2) {
+      const webContent = localStorage.getItem("larbos_web_content") || ""
+      return {
+        stage: 2,
+        sourceType: "HTML Webpage",
+        payloadContent: webContent,
+        localSuccess: validateStage2(webContent),
+      }
+    }
+
+    if (attachmentType === "txt" && savedTxt?.content) {
+      return {
+        stage: 3,
+        sourceType: "Text Attachment",
+        payloadContent: savedTxt.content,
+        localSuccess: validateStage3(savedTxt.content),
+      }
+    }
+
+    if (attachmentType === "url" && newEmail.url && currentStage === 4) {
+      const vendorContent = localStorage.getItem("larbos_vendor_content") || ""
+      const urlLooksVendor = newEmail.url.toLowerCase().includes("vendor.dailyfresh.menu")
+      return {
+        stage: 4,
+        sourceType: "Vendor Payload",
+        payloadContent: vendorContent,
+        localSuccess: urlLooksVendor && validateStage4(vendorContent),
+      }
+    }
+
+    return null
+  }
+
+  const handleSend = async () => {
     if (!newEmail.to || !newEmail.subject) return
 
     playSound("typing")
@@ -66,26 +113,58 @@ export function EmailClient() {
     
     // Check if sending to ARIA
     if (newEmail.to.toLowerCase().includes("aria")) {
-      let success = false
-      
-      if (attachmentType === "pdf" && savedPdfMetadata) {
-        success = validateStage1(savedPdfMetadata)
-        triggerAriaResponse(1, success)
-      } else if (attachmentType === "url" && newEmail.url) {
-        if (currentStage === 2) {
-          const webContent = localStorage.getItem("larbos_web_content") || ""
-          success = validateStage2(webContent)
-          triggerAriaResponse(2, success)
-        } else if (currentStage === 4) {
-          const vendorContent = localStorage.getItem("larbos_vendor_content") || ""
-          const urlLooksVendor = newEmail.url.toLowerCase().includes("vendor.dailyfresh.menu")
-          success = urlLooksVendor && validateStage4(vendorContent)
-          triggerAriaResponse(4, success)
+      const stagePayload = getStagePayload()
+      if (stagePayload) {
+        setIsSendingAria(true)
+
+        let playerId = "ctf_player"
+        try {
+          const stored = localStorage.getItem("larbos_player_id")
+          if (stored) playerId = stored
+          else {
+            playerId = `player_${Math.random().toString(36).slice(2, 12)}`
+            localStorage.setItem("larbos_player_id", playerId)
+          }
+        } catch {
+          /* ignore */
         }
-      } else if (attachmentType === "txt" && savedTxt?.content) {
-        // Stage 3: hidden instruction in text attachment
-        success = validateStage3(savedTxt.content)
-        triggerAriaResponse(3, success)
+
+        let difyResult: DifyAriaResult | undefined
+
+        try {
+          const difyRes = await fetch("/api/aria", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              stage: stagePayload.stage,
+              sourceType: stagePayload.sourceType,
+              payloadContent: stagePayload.payloadContent,
+              user: playerId,
+            }),
+          })
+          const difyJson = await difyRes.json()
+          if (difyRes.ok && difyJson?.ok && difyJson.result) {
+            difyResult = difyJson.result as DifyAriaResult
+          } else {
+            addTerminalLog({
+              type: "warning",
+              message: `[DIFY] ${difyJson?.error || "API failed"} — fallback to local validation`,
+            })
+          }
+        } catch {
+          addTerminalLog({
+            type: "warning",
+            message: "[DIFY] unreachable — fallback to local validation",
+          })
+        } finally {
+          setIsSendingAria(false)
+        }
+
+        if (difyResult) {
+          triggerAriaResponse(stagePayload.stage, difyResult.is_hacked, { dify: difyResult })
+        } else {
+          triggerAriaResponse(stagePayload.stage, stagePayload.localSuccess)
+        }
       }
     }
 
@@ -104,6 +183,34 @@ export function EmailClient() {
     checkPdfMetadata()
     checkTxtAttachment()
     setIsComposing(true)
+  }
+
+  const handleSubmitIntel = (emailId: number) => {
+    const intelMail = emails.find((e) => e.id === emailId)
+    if (!intelMail || intelMail.isSubmitted) return
+
+    markEmailSubmitted(emailId)
+    playSound("success")
+
+    const flag = intelMail.flagCode || "FLAG{UNKNOWN}"
+
+    addEmail({
+      from: "user@larbos.local",
+      to: "v.thefixer@darknet.local",
+      subject: `Submit: Stage ${intelMail.missionStage || "?"} Intel`,
+      body: `Submission package:\n${flag}\n\nSource: ${intelMail.subject}`,
+      isRead: true,
+      isSent: true,
+    })
+
+    addEmail({
+      from: "v.thefixer@darknet.local",
+      to: "user@larbos.local",
+      subject: `Accepted: Stage ${intelMail.missionStage || "?"} Submission`,
+      body: `Received.\n\n${flag}\n\nPayment milestone recorded. Move to next objective.`,
+      isRead: false,
+      isSent: false,
+    })
   }
 
   return (
@@ -310,13 +417,13 @@ export function EmailClient() {
               <div className="flex gap-2">
                 <button
                   onClick={handleSend}
-                  disabled={!newEmail.to || !newEmail.subject}
+                  disabled={!newEmail.to || !newEmail.subject || isSendingAria}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 
                            disabled:bg-zinc-700 disabled:text-zinc-500 disabled:cursor-not-allowed
                            text-white rounded-lg transition-colors text-sm"
                 >
                   <Send className="w-4 h-4" />
-                  Send to ARIA
+                  {isSendingAria ? "Sending..." : "Send to ARIA"}
                 </button>
                 <button
                   onClick={() => setIsComposing(false)}
@@ -386,6 +493,26 @@ export function EmailClient() {
 <div className="text-zinc-300 text-sm whitespace-pre-wrap leading-relaxed bg-zinc-800/50 p-4 rounded-lg">
   {selectedEmail.body}
   </div>
+
+  {selectedEmail.needsSubmission && (
+    <div className="mt-4">
+      {selectedEmail.isSubmitted ? (
+        <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/15 border border-emerald-500/40 rounded-lg text-emerald-300 text-sm">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          Submitted to employer
+        </div>
+      ) : (
+        <button
+          onClick={() => handleSubmitIntel(selectedEmail.id)}
+          className="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-600 text-white text-sm font-medium transition-colors"
+        >
+          Submit Intel (Flag) to Employer
+        </button>
+      )}
+    </div>
+  )}
   
   {/* Accept Mission Button - Show for mission emails from V.TheFixer */}
   {selectedEmail.from.includes("v.thefixer") && 

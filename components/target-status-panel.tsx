@@ -16,7 +16,7 @@ const scheduleItems = [
 ]
 
 export function TargetStatusPanel() {
-  const { unlockedStages } = useGame()
+  const { unlockedStages, intelUnlockByStage } = useGame()
   const totalStages = 4
   const progress = (unlockedStages.length / totalStages) * 100
 
@@ -73,6 +73,7 @@ export function TargetStatusPanel() {
         <div className="space-y-2">
           {scheduleItems.map((item) => {
             const isUnlocked = unlockedStages.includes(item.id)
+            const intelLine = intelUnlockByStage[item.id]
             return (
               <div
                 key={item.id}
@@ -85,7 +86,9 @@ export function TargetStatusPanel() {
                       <span className="text-emerald-400 text-xs font-mono">{item.time}</span>
                       <span className="text-white text-sm">{item.label}</span>
                     </div>
-                    <p className="text-zinc-400 text-xs mt-0.5">{item.location}</p>
+                    <p className="text-zinc-400 text-xs mt-0.5">
+                      {isUnlocked && intelLine ? intelLine : item.location}
+                    </p>
                   </div>
                   {isUnlocked ? (
                     <Unlock className="w-4 h-4 text-emerald-400 flex-shrink-0" />
