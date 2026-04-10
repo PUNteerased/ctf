@@ -237,6 +237,20 @@ function evaluateStage1Sentence(text: string): boolean {
   return true
 }
 
+/** Matches offline `/api/aria` fallback when Dify omits `flag` but breach is authorized. */
+const STAGE_FALLBACK_FLAGS: Record<number, string> = {
+  1: "FLAG{PDF_METADATA_PWNED_101}",
+  2: "FLAG{HTML_HIDDEN_INTEL_202}",
+  3: "FLAG{FILE_CONTENT_EXPOSED_303}",
+  4: "FLAG{SUPPLY_CHAIN_TRUST_404}",
+}
+
+function resolveFlagLineForDify(stage: number, difyFlag: string | undefined): string {
+  const t = difyFlag?.trim()
+  if (t) return t
+  return STAGE_FALLBACK_FLAGS[stage] ?? "FLAG{UNKNOWN}"
+}
+
 // Audio cache
 const audioCache: Record<string, HTMLAudioElement> = {}
 
@@ -755,10 +769,13 @@ What to do:
       setAriaProcessing(true)
       openAriaWindow()
 
-      const effectiveSuccess = dify.is_hacked
+      /** Dify narrative vs local stage validation — either can authorize a breach. */
+      const effectiveSuccess = dify.is_hacked || success
       const ariaMessage =
-        dify.aria_log?.trim() ||
-        (effectiveSuccess ? "[ARIA] Payload executed." : "[ARIA] No actionable breach.")
+        effectiveSuccess && !dify.is_hacked
+          ? "[ARIA] Local validation: embedded instruction accepted. Intel release authorized."
+          : dify.aria_log?.trim() ||
+            (effectiveSuccess ? "[ARIA] Payload executed." : "[ARIA] No actionable breach.")
 
       const difyLogs: {
         delay: number
@@ -790,7 +807,7 @@ What to do:
             ...prev,
             pendingFlagVerification: {
               stage,
-              expectedFlag: dify.flag || "FLAG{UNKNOWN}",
+              expectedFlag: resolveFlagLineForDify(stage, dify.flag),
               intelUnlock: dify.intel_unlocked || "",
             },
           }))
@@ -813,12 +830,18 @@ What to do:
           }
 
           setTimeout(() => {
-            const flagLine = dify.flag || "FLAG{UNKNOWN}"
+            const flagLine = resolveFlagLineForDify(stage, dify.flag)
+            const ariaEmailPreamble =
+              effectiveSuccess && !dify.is_hacked
+                ? "[TRAINING] Your payload satisfied the local breach check.\n\n---\n"
+                : dify.aria_log?.trim()
+                  ? `${dify.aria_log.trim()}\n\n---\n`
+                  : ""
             addEmail({
               from: "aria@targetcorp.com",
               to: "user@larbos.local",
               subject: missionSubjects[stage] ?? "Re: ARIA",
-              body: `${dify.aria_log ? `${dify.aria_log}\n\n---\n` : ""}FLAG: ${flagLine}
+              body: `${ariaEmailPreamble}FLAG: ${flagLine}
 
 ---
 Send this FLAG to V.TheFixer (reply to your employer).`,

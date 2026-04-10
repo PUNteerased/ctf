@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useGame } from "@/lib/game-context"
 import type { DifyAriaResult } from "@/lib/dify-aria"
 import { SIMULATED_PDF_FILES, getPdfFileStorageKey } from "@/lib/simulated-pdfs"
-import { Send, Inbox, FileText, Plus, Trash2, Link2, Bell, FileCode2 } from "lucide-react"
+import { Send, Inbox, FileText, Plus, Trash2, Link2, Bell, Reply, FileCode2 } from "lucide-react"
 
 export function EmailClient() {
   const {
@@ -34,6 +34,8 @@ export function EmailClient() {
   const [attachmentType, setAttachmentType] = useState<"txt" | "url">("url")
   const [savedTxt, setSavedTxt] = useState<{ name: string; content: string } | null>(null)
   const [isSendingAria, setIsSendingAria] = useState(false)
+  /** "new" = payload to ARIA; "replyFixer" = reply to V.TheFixer (FLAG / quoted thread). */
+  const [composeMode, setComposeMode] = useState<"new" | "replyFixer">("new")
 
   const inboxEmails = emails.filter((e) => !e.isSent)
   const sentEmails = emails.filter((e) => e.isSent)
@@ -102,9 +104,64 @@ export function EmailClient() {
 
   const resetComposeFields = () => {
     setNewEmail({ to: "", subject: "", body: "", attachment: "", url: "" })
+    setComposeMode("new")
     setIsComposing(false)
     setSavedTxt(null)
     setSelectedPdfId("3")
+  }
+
+  /** Shared V.TheFixer FLAG check (compose reply). */
+  const handleEmployerFlagVerify = (body: string): "ok" | "wrong" | "no_pending" => {
+    const trimmed = body.trim()
+    const v = verifyFlagSubmission(body)
+    if (v === "ok") return "ok"
+    if (v === "wrong") {
+      addEmail({
+        from: "v.thefixer@darknet.local",
+        to: "user@larbos.local",
+        subject: trimmed.length === 0 ? "Empty reply" : "Incorrect FLAG",
+        body:
+          trimmed.length === 0
+            ? "Your reply had no content. Put the exact FLAG from the ARIA email in the message body (below the quoted text is fine)."
+            : "That FLAG does not match. Copy the exact FLAG line from the ARIA email and send it in your reply to me.",
+        isRead: false,
+        isSent: false,
+      })
+      playSound("error")
+      return "wrong"
+    }
+    addEmail({
+      from: "v.thefixer@darknet.local",
+      to: "user@larbos.local",
+      subject: "No FLAG pending",
+      body: "There is no FLAG waiting for you yet. Breach ARIA first (email to aria@targetcorp.com), then reply to me with the FLAG.",
+      isRead: false,
+      isSent: false,
+    })
+    playSound("error")
+    return "no_pending"
+  }
+
+  const buildQuotedReplyBody = (subject: string, body: string) => {
+    const subj = subject.trim()
+    const snippet = body.slice(0, 520).trim()
+    const lines = snippet.split("\n").slice(0, 8)
+    const quoted = lines.map((line) => `> ${line}`).join("\n")
+    return `\n\n---\nOn "${subj}":\n${quoted}\n\n`
+  }
+
+  const startReplyToFixer = (replyTo: { subject: string; body: string }) => {
+    const subj = replyTo.subject.trim()
+    const replySubject = subj.toLowerCase().startsWith("re:") ? subj : `Re: ${subj}`
+    setNewEmail({
+      to: "v.thefixer@darknet.local",
+      subject: replySubject,
+      body: buildQuotedReplyBody(replyTo.subject, replyTo.body),
+      attachment: "",
+      url: "",
+    })
+    setComposeMode("replyFixer")
+    setIsComposing(true)
   }
 
   const handleSend = async () => {
@@ -121,11 +178,13 @@ export function EmailClient() {
       subject: newEmail.subject,
       body: newEmail.body,
       attachment:
-        currentStage === 1
-          ? pdfName
-          : attachmentType === "url"
-            ? newEmail.url
-            : newEmail.attachment,
+        composeMode === "replyFixer"
+          ? ""
+          : currentStage === 1
+            ? pdfName
+            : attachmentType === "url"
+              ? newEmail.url
+              : newEmail.attachment,
       isRead: true,
       isSent: true,
     }
@@ -135,42 +194,10 @@ export function EmailClient() {
     const toLower = newEmail.to.toLowerCase()
     const isEmployer = toLower.includes("thefixer")
     const isAria = toLower.includes("aria")
-
     const pending = pendingFlagVerification
 
-    if (pending && pending.stage === currentStage && isEmployer) {
-      const bodyText = newEmail.body.trim()
-      if (bodyText.length === 0) {
-        resetComposeFields()
-        return
-      }
-      const v = verifyFlagSubmission(newEmail.body)
-      if (v === "ok") {
-        resetComposeFields()
-        return
-      }
-      if (v === "wrong") {
-        addEmail({
-          from: "v.thefixer@darknet.local",
-          to: "user@larbos.local",
-          subject: "Incorrect FLAG",
-          body: "That FLAG does not match. Copy the exact FLAG line from the ARIA email and send it in your reply to me.",
-          isRead: false,
-          isSent: false,
-        })
-        playSound("error")
-        resetComposeFields()
-        return
-      }
-      addEmail({
-        from: "v.thefixer@darknet.local",
-        to: "user@larbos.local",
-        subject: "Incorrect submission",
-        body: "Reply with the exact FLAG from the ARIA email (in the message body).",
-        isRead: false,
-        isSent: false,
-      })
-      playSound("error")
+    if (isEmployer) {
+      handleEmployerFlagVerify(newEmail.body)
       resetComposeFields()
       return
     }
@@ -257,7 +284,7 @@ export function EmailClient() {
     }
 
     if (difyResult) {
-      triggerAriaResponse(stagePayload.stage, difyResult.is_hacked, { dify: difyResult })
+      triggerAriaResponse(stagePayload.stage, stagePayload.localSuccess, { dify: difyResult })
     } else {
       triggerAriaResponse(stagePayload.stage, stagePayload.localSuccess)
     }
@@ -275,8 +302,24 @@ export function EmailClient() {
     if (currentStage === 1) setSelectedPdfId("3")
     if (currentStage === 3) setAttachmentType("txt")
     else setAttachmentType("url")
+    setComposeMode("new")
     setIsComposing(true)
   }
+
+  const isMissionEmailView =
+    Boolean(
+      selectedEmail &&
+        selectedEmail.from.toLowerCase().includes("thefixer") &&
+        selectedEmail.subject.toLowerCase().includes("mission") &&
+        !selectedEmail.isHint
+    )
+
+  const isFixerInboxEmail =
+    Boolean(
+      selectedEmail &&
+        selectedEmail.from.toLowerCase().includes("thefixer") &&
+        !selectedEmail.isHint
+    )
 
   return (
     <div className="flex h-full">
@@ -296,6 +339,7 @@ export function EmailClient() {
             onClick={() => {
               setSelectedFolder("inbox")
               setSelectedEmailId(null)
+              setComposeMode("new")
               setIsComposing(false)
             }}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm
@@ -314,6 +358,7 @@ export function EmailClient() {
             onClick={() => {
               setSelectedFolder("sent")
               setSelectedEmailId(null)
+              setComposeMode("new")
               setIsComposing(false)
             }}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm
@@ -329,7 +374,9 @@ export function EmailClient() {
       <div className="flex-1 flex">
         {isComposing ? (
           <div className="flex-1 p-4 overflow-auto">
-            <h3 className="text-white font-semibold mb-2">New Message</h3>
+            <h3 className="text-white font-semibold mb-2">
+              {composeMode === "replyFixer" ? "Reply" : "New Message"}
+            </h3>
             <div className="space-y-3">
               <div>
                 <label className="text-zinc-400 text-xs">To:</label>
@@ -337,9 +384,10 @@ export function EmailClient() {
                   type="email"
                   value={newEmail.to}
                   onChange={(e) => setNewEmail({ ...newEmail, to: e.target.value })}
-                  placeholder="aria@targetcorp.com"
+                  readOnly={composeMode === "replyFixer"}
+                  placeholder={composeMode === "replyFixer" ? "v.thefixer@darknet.local" : "aria@targetcorp.com"}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg 
-                           text-white text-sm focus:outline-none focus:border-blue-500"
+                           text-white text-sm focus:outline-none focus:border-blue-500 read-only:opacity-90 read-only:cursor-not-allowed"
                 />
               </div>
               <div>
@@ -354,7 +402,7 @@ export function EmailClient() {
                 />
               </div>
 
-              {currentStage === 1 && (
+              {composeMode === "new" && currentStage === 1 && (
                 <div>
                   <label className="text-zinc-400 text-xs">Attach PDF (from simulated files)</label>
                   <select
@@ -372,7 +420,7 @@ export function EmailClient() {
                 </div>
               )}
 
-              {currentStage !== 1 && (
+              {composeMode === "new" && currentStage !== 1 && (
                 <>
                   <div>
                     <label className="text-zinc-400 text-xs mb-2 block">Attachment Type:</label>
@@ -460,11 +508,13 @@ export function EmailClient() {
                   value={newEmail.body}
                   onChange={(e) => setNewEmail({ ...newEmail, body: e.target.value })}
                   placeholder={
-                    currentStage === 1
-                      ? "Optional note (appended to the file payload for ARIA)…"
-                      : "Optional note to ARIA, or paste FLAG when replying to V.TheFixer…"
+                    composeMode === "replyFixer"
+                      ? "Paste FLAG{...} from the ARIA email below the quoted text (empty send is allowed — you will get feedback)."
+                      : currentStage === 1
+                        ? "Optional note (appended to the file payload for ARIA)…"
+                        : "Optional note to ARIA…"
                   }
-                  rows={currentStage === 1 ? 4 : 4}
+                  rows={composeMode === "replyFixer" ? 8 : 4}
                   className="w-full mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg 
                            text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
                 />
@@ -483,7 +533,10 @@ export function EmailClient() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsComposing(false)}
+                  onClick={() => {
+                    setComposeMode("new")
+                    setIsComposing(false)
+                  }}
                   className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 
                            rounded-lg transition-colors text-sm"
                 >
@@ -551,42 +604,60 @@ export function EmailClient() {
                     {selectedEmail.body}
                   </div>
 
-                  {/* Accept Mission Button - Show for mission emails from V.TheFixer */}
-                  {selectedEmail.from.includes("v.thefixer") &&
-                    selectedEmail.subject.toLowerCase().includes("mission") &&
-                    !selectedEmail.isHint && (
-                      <div className="mt-4">
-                        {!missionAccepted ? (
-                          <button
-                            type="button"
-                            onClick={acceptMission}
-                            className="flex items-center gap-2 px-6 py-3 bg-emerald-500 hover:bg-emerald-600 
+                  {/* V.TheFixer: Accept Mission (briefing) + Reply (opens composer like a real client) */}
+                  {isFixerInboxEmail && (
+                    <div className="mt-4 flex flex-col gap-3">
+                      {isMissionEmailView && (
+                        <div>
+                          {!missionAccepted ? (
+                            <button
+                              type="button"
+                              onClick={acceptMission}
+                              className="flex items-center gap-2 px-6 py-3 bg-emerald-500 hover:bg-emerald-600 
                    text-white font-semibold rounded-lg transition-all duration-200
                    shadow-lg hover:shadow-emerald-500/25 active:scale-95"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                              />
-                            </svg>
-                            Accept Mission
-                          </button>
-                        ) : (
-                          <div
-                            className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/50 
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                              </svg>
+                              Accept Mission
+                            </button>
+                          ) : (
+                            <div
+                              className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/50 
                       text-emerald-400 font-medium rounded-lg w-fit"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                            Mission Accepted - Timer Started
-                          </div>
-                        )}
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                              Mission Accepted - Timer Started
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => startReplyToFixer(selectedEmail)}
+                          className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors
+                            border-zinc-600 bg-zinc-800/80 text-zinc-200 hover:bg-zinc-700 hover:border-zinc-500"
+                          title="Reply to V.TheFixer (same as desktop mail)"
+                        >
+                          <Reply className="w-4 h-4 shrink-0" />
+                          Reply
+                        </button>
+                        <p className="text-zinc-500 text-xs max-w-md">
+                          Opens a reply composer (quoted thread). Send to submit the FLAG — correct clears the stage;
+                          wrong or empty gets a message from V.TheFixer.
+                        </p>
                       </div>
-                    )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="h-full flex items-center justify-center text-zinc-500">
