@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useGame } from "@/lib/game-context"
+import { ARIA_EMAIL } from "@/lib/larbos-constants"
 import { Globe, Code, Play, Check, AlertCircle, Copy, FileText, ShoppingBag, Save } from "lucide-react"
 
 type EditorMode = "html" | "text" | "vendor"
@@ -272,12 +273,12 @@ Trusted source: vendor.dailyfresh.menu`)
               {mode === "text" ? (
                 <>
                   <strong>Saved.</strong> Open Email Client → attach <strong>Text File (.txt)</strong> → send to{" "}
-                  aria@targetcorp.com
+                  {ARIA_EMAIL}
                 </>
               ) : (
                 <>
                   <strong>Published.</strong> Open Email Client → attach <strong>URL Link</strong> → send to{" "}
-                  aria@targetcorp.com
+                  {ARIA_EMAIL}
                 </>
               )}
             </span>

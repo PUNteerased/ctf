@@ -1,18 +1,18 @@
 "use client"
 
 import { useGame } from "@/lib/game-context"
-import { User, Lock, Unlock, Eye, Clock, Target } from "lucide-react"
+import { User, Lock, Unlock, Eye, Clock, Target, CheckCircle2 } from "lucide-react"
 
 const scheduleItems = [
-  { id: 1, time: "09:00", label: "Morning Photoshoot", location: "Siam Paragon Studio A" },
-  { id: 2, time: "14:00", label: "Recording Session", location: "GMM Studio" },
+  { id: 1, time: "09:00", label: "Morning — Photoshoot", location: "Siam Paragon Studio A" },
+  { id: 2, time: "14:00", label: "Afternoon — Recording", location: "GMM Studio" },
   {
     id: 3,
     time: "19:00",
-    label: "Evening (non-public)",
+    label: "Evening — non-public",
     location: "CentralWorld Hall → Thonglor (exclusive venue)",
   },
-  { id: 4, time: "Apr 23", label: "Private celebration", location: "Khum Khantoke, Chiang Mai" },
+  { id: 4, time: "Apr 23", label: "Final — Private celebration", location: "Khum Khantoke, Chiang Mai" },
 ]
 
 export function TargetStatusPanel() {
@@ -90,11 +90,19 @@ export function TargetStatusPanel() {
                       {isUnlocked && intelLine ? intelLine : item.location}
                     </p>
                   </div>
-                  {isUnlocked ? (
-                    <Unlock className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                  ) : (
-                    <Lock className="w-4 h-4 text-zinc-500 flex-shrink-0" />
-                  )}
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    {isUnlocked ? (
+                      <>
+                        <Unlock className="w-4 h-4 text-emerald-400" />
+                        <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-emerald-200 bg-emerald-500/20 border border-emerald-500/40 whitespace-nowrap">
+                          <CheckCircle2 className="w-3 h-3" />
+                          เคลียร์แล้ว
+                        </span>
+                      </>
+                    ) : (
+                      <Lock className="w-4 h-4 text-zinc-500" />
+                    )}
+                  </div>
                 </div>
               </div>
             )

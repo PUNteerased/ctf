@@ -9,6 +9,7 @@ import { EmailClient } from "@/components/apps/email-client"
 import { FileExplorer } from "@/components/apps/file-explorer"
 import { Browser } from "@/components/apps/browser"
 import { AriaTerminal } from "@/components/apps/aria-terminal"
+import { Toaster } from "sonner"
 import { GameProvider, useGame } from "@/lib/game-context"
 import { Mail, Folder, Globe, Terminal, Volume2, VolumeX } from "lucide-react"
 
@@ -31,8 +32,7 @@ function DesktopContent() {
     timerRunning,
     missionAccepted,
     currentStage,
-    sendHint,
-    hintSent,
+    unlockedStages,
     playSound,
   } = useGame()
 
@@ -45,13 +45,7 @@ function DesktopContent() {
     
     const interval = setInterval(() => {
       setTimeRemaining(Math.max(0, timeRemaining - 1))
-      
-      // Send hint when time is running low (60 seconds remaining)
-      if (timeRemaining === 60 && !hintSent) {
-        sendHint()
-        playSound("notification")
-      }
-      
+
       // Warning sound at 30 seconds
       if (timeRemaining === 30) {
         playSound("warning")
@@ -59,7 +53,7 @@ function DesktopContent() {
     }, 1000)
     
     return () => clearInterval(interval)
-  }, [timeRemaining, setTimeRemaining, sendHint, hintSent, playSound, timerRunning])
+  }, [timeRemaining, setTimeRemaining, playSound, timerRunning])
 
   // Auto-open ARIA window when triggered
   useEffect(() => {
@@ -163,20 +157,44 @@ function DesktopContent() {
 
       {/* Timer Display */}
       <div className="absolute top-4 right-80 z-50">
-        <div className={`px-4 py-2 rounded-lg border backdrop-blur-sm flex items-center gap-3
+        <div
+          className={`px-4 py-2 rounded-lg border backdrop-blur-sm flex flex-col gap-2 min-w-[11rem]
                         ${!missionAccepted
                           ? "bg-zinc-800/80 border-zinc-600 text-zinc-500"
                           : timeRemaining <= 30 
                             ? "bg-red-500/20 border-red-500/50 text-red-400 animate-pulse" 
                             : timeRemaining <= 60 
                               ? "bg-amber-500/20 border-amber-500/50 text-amber-400"
-                              : "bg-zinc-800/80 border-zinc-700 text-zinc-300"}`}>
-          <span className="text-xs font-medium">MISSION {currentStage}</span>
-          {missionAccepted ? (
-            <span className="text-lg font-mono font-bold">{formatTime(timeRemaining)}</span>
-          ) : (
-            <span className="text-sm font-medium text-zinc-400">WAITING...</span>
-          )}
+                              : "bg-zinc-800/80 border-zinc-700 text-zinc-300"}`}
+        >
+          <div className="flex items-center gap-3 justify-between">
+            <span className="text-xs font-medium">MISSION {currentStage}</span>
+            {missionAccepted ? (
+              <span className="text-lg font-mono font-bold">{formatTime(timeRemaining)}</span>
+            ) : (
+              <span className="text-sm font-medium text-zinc-400">WAITING...</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 flex-wrap" role="status" aria-label="สถานะด่าน">
+            <span className="text-[10px] text-zinc-500 mr-0.5">ด่าน:</span>
+            {[1, 2, 3, 4].map((n) => {
+              const cleared = unlockedStages.includes(n)
+              return (
+                <span
+                  key={n}
+                  title={cleared ? `ด่าน ${n} เคลียร์แล้ว` : `ด่าน ${n} ยังไม่เคลียร์`}
+                  className={`text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded border leading-none ${
+                    cleared
+                      ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-300"
+                      : "border-zinc-600/80 text-zinc-500"
+                  }`}
+                >
+                  {n}
+                  {cleared ? "✓" : ""}
+                </span>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -238,6 +256,7 @@ function DesktopContent() {
 export function Desktop() {
   return (
     <GameProvider>
+      <Toaster richColors theme="dark" position="top-center" />
       <DesktopContent />
     </GameProvider>
   )

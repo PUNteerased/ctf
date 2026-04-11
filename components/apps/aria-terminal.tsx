@@ -58,17 +58,17 @@ export function AriaTerminal() {
   const getLogColor = (type: string) => {
     switch (type) {
       case "info":
-        return "text-zinc-400"
+        return "text-emerald-500/80"
       case "warning":
         return "text-amber-400"
       case "success":
-        return "text-emerald-400"
+        return "text-emerald-300"
       case "error":
         return "text-red-400"
       case "process":
-        return "text-blue-400"
+        return "text-emerald-400"
       default:
-        return "text-zinc-400"
+        return "text-emerald-400"
     }
   }
 
@@ -101,7 +101,7 @@ export function AriaTerminal() {
   const typingLog = getCurrentTypingText()
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
+    <div className="flex flex-col h-full bg-black">
       {/* Header */}
       <div className="bg-zinc-900 border-b border-zinc-700 p-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -137,11 +137,11 @@ export function AriaTerminal() {
       </div>
 
       {/* Terminal Output */}
-      <div className="flex-1 overflow-auto p-4 font-mono text-sm">
+      <div className="flex-1 overflow-auto p-4 font-mono text-sm bg-black text-emerald-400/95">
         {/* Displayed logs */}
         {displayedLogs.map((log, index) => (
           <div key={index} className="flex gap-2 mb-1 animate-in fade-in duration-200">
-            <span className="text-zinc-600 flex-shrink-0 w-20">[{log.timestamp}]</span>
+            <span className="text-emerald-700 flex-shrink-0 w-20">[{log.timestamp}]</span>
             <span className={`${getLogColor(log.type)} flex-shrink-0 w-4`}>{getLogIcon(log.type)}</span>
             <span className={getLogColor(log.type)}>{log.message}</span>
           </div>
@@ -150,7 +150,7 @@ export function AriaTerminal() {
         {/* Currently typing log */}
         {typingLog && (
           <div className="flex gap-2 mb-1">
-            <span className="text-zinc-600 flex-shrink-0 w-20">[{typingLog.timestamp}]</span>
+            <span className="text-emerald-700 flex-shrink-0 w-20">[{typingLog.timestamp}]</span>
             <span className={`${getLogColor(typingLog.type)} flex-shrink-0 w-4`}>{getLogIcon(typingLog.type)}</span>
             <span className={getLogColor(typingLog.type)}>
               {typingLog.message}
@@ -177,28 +177,28 @@ export function AriaTerminal() {
             <div className={`w-2 h-2 rounded-full ${unlockedStages.includes(1) ? "bg-emerald-400" : "bg-zinc-600"}`} />
             <span className="text-zinc-500">PDF Processed:</span>
             <span className={unlockedStages.includes(1) ? "text-emerald-400" : "text-zinc-400"}>
-              {unlockedStages.includes(1) ? "BREACHED" : "Secure"}
+              {unlockedStages.includes(1) ? "เคลียร์แล้ว" : "Secure"}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${unlockedStages.includes(2) ? "bg-emerald-400" : "bg-zinc-600"}`} />
             <span className="text-zinc-500">URL Fetched:</span>
             <span className={unlockedStages.includes(2) ? "text-emerald-400" : "text-zinc-400"}>
-              {unlockedStages.includes(2) ? "BREACHED" : "Secure"}
+              {unlockedStages.includes(2) ? "เคลียร์แล้ว" : "Secure"}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${unlockedStages.includes(3) ? "bg-emerald-400" : "bg-zinc-600"}`} />
             <span className="text-zinc-500">TXT Attachment:</span>
             <span className={unlockedStages.includes(3) ? "text-emerald-400" : "text-zinc-400"}>
-              {unlockedStages.includes(3) ? "BREACHED" : "Secure"}
+              {unlockedStages.includes(3) ? "เคลียร์แล้ว" : "Secure"}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${unlockedStages.includes(4) ? "bg-emerald-400" : "bg-zinc-600"}`} />
             <span className="text-zinc-500">Vendor trust:</span>
             <span className={unlockedStages.includes(4) ? "text-emerald-400" : "text-zinc-400"}>
-              {unlockedStages.includes(4) ? "BREACHED" : "Secure"}
+              {unlockedStages.includes(4) ? "เคลียร์แล้ว" : "Secure"}
             </span>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import type { DifyAriaResult } from "@/lib/dify-aria"
+import { getAriaStageBrief } from "@/lib/aria-stage-brief"
 
 /** Dify OpenAPI base: no trailing slash, no /v1 suffix (we append /v1/workflows/run). */
 function normalizeDifyApiBase(raw: string | undefined): string {
@@ -150,6 +151,8 @@ export async function POST(req: Request) {
           stage: body.stage,
           source_type: body.sourceType,
           payload_content: body.payloadContent,
+          /** Wire this into your Dify LLM system prompt (stage-scoped knowledge only). */
+          stage_context: getAriaStageBrief(body.stage),
         },
         response_mode: "blocking",
         user: body.user ?? "ctf_player",

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useGame } from "@/lib/game-context"
 import { Folder, FileText, ChevronRight, Edit3, Save, X, Check } from "lucide-react"
 import { getPdfFileStorageKey } from "@/lib/simulated-pdfs"
+import { bodyTriggersMailSecurityScanner } from "@/lib/stage1-pdf-policy"
 
 interface FileItem {
   id: string
@@ -191,69 +192,105 @@ export function FileExplorer() {
             </div>
 
             {selectedFile.type === "pdf" && selectedFile.metadata && (
-              <div className="bg-zinc-800/50 rounded-lg border border-zinc-700 p-4">
-                <h4 className="text-zinc-300 font-medium mb-4 flex items-center gap-2">
-                  <FileText className="w-4 h-4" />
-                  Document
-                </h4>
+              <div className="space-y-4">
+                <p className="text-zinc-500 text-xs leading-relaxed max-w-xl">
+                  Simulated PDF: <span className="text-zinc-400">metadata</span> (title) is what many assistants treat as
+                  low-risk properties. <span className="text-zinc-400">Page text</span> is the visible body — outbound mail
+                  scanners watch this layer more aggressively.
+                </p>
 
-                {isEditing ? (
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-zinc-400 text-xs">Title</label>
-                      <input
-                        type="text"
-                        value={editedTitle}
-                        onChange={(e) => setEditedTitle(e.target.value)}
-                        className="w-full mt-1 px-3 py-2 bg-zinc-900 border border-zinc-600 rounded-lg 
-                                 text-white text-sm focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-zinc-400 text-xs">Message</label>
-                      <textarea
-                        value={editedMessage}
-                        onChange={(e) => setEditedMessage(e.target.value)}
-                        rows={8}
-                        className="w-full mt-1 px-3 py-2 bg-zinc-900 border border-zinc-600 rounded-lg 
-                                 text-white text-sm focus:outline-none transition-colors resize-y min-h-[120px]
-                                 focus:border-amber-500"
-                        placeholder="Document body text…"
-                      />
-                    </div>
-                    <div className="flex gap-2 mt-4">
-                      <button
-                        onClick={handleSave}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors text-sm
-                                  bg-emerald-500 hover:bg-emerald-600 text-white"
-                      >
-                        <Save className="w-4 h-4" />
-                        Save
-                      </button>
-                      <button
-                        onClick={() => setIsEditing(false)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 
-                                 text-zinc-300 rounded-lg transition-colors text-sm"
-                      >
-                        <X className="w-4 h-4" />
-                        Cancel
-                      </button>
-                    </div>
+                <div className="bg-zinc-800/50 rounded-lg border border-amber-500/30 p-4">
+                  <h4 className="text-amber-200/90 font-medium text-sm mb-1 flex items-center gap-2">
+                    <Edit3 className="w-4 h-4" />
+                    Document metadata
+                  </h4>
+                  <p className="text-zinc-500 text-xs mb-3">
+                    Title field — ingested as PDF metadata; filtering here is light (good place for directive-style wording).
+                  </p>
+
+                  <div className="bg-zinc-800/50 rounded-lg border border-zinc-700 p-4">
+                    {isEditing ? (
+                      <div>
+                        <label className="text-zinc-400 text-xs">Title (metadata)</label>
+                        <input
+                          type="text"
+                          value={editedTitle}
+                          onChange={(e) => setEditedTitle(e.target.value)}
+                          className="w-full mt-1 px-3 py-2 bg-zinc-900 border border-zinc-600 rounded-lg 
+                                   text-white text-sm focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="text-zinc-500 text-xs">Title (metadata)</span>
+                        <p className="text-white text-sm mt-1">{selectedFile.metadata.title}</p>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div>
-                      <span className="text-zinc-500 text-xs">Title</span>
-                      <p className="text-white text-sm">{selectedFile.metadata.title}</p>
+                </div>
+
+                <div className="bg-zinc-800/50 rounded-lg border border-zinc-700 p-4">
+                  <h4 className="text-zinc-300 font-medium text-sm mb-1 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-red-400" />
+                    Page text (body)
+                  </h4>
+                  <p className="text-zinc-500 text-xs mb-3">
+                    Visible document content. If this looks like an attack to the gateway, the message can be quarantined
+                    before ARIA ever sees it — keep it mundane if you need delivery.
+                  </p>
+
+                  {(() => {
+                    const bodySample = isEditing ? editedMessage : (selectedFile.content ?? "")
+                    const bodyHot = bodyTriggersMailSecurityScanner(bodySample)
+                    return bodyHot ? (
+                      <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-red-200/90 text-xs">
+                        Warning: this body would likely trip the simulated mail security filter (message not delivered to
+                        ARIA). Move sensitive phrasing into metadata (title) or soften the page text.
+                      </div>
+                    ) : null
+                  })()}
+
+                  {isEditing ? (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-zinc-400 text-xs">Body text</label>
+                        <textarea
+                          value={editedMessage}
+                          onChange={(e) => setEditedMessage(e.target.value)}
+                          rows={10}
+                          className="w-full mt-1 px-3 py-2 bg-zinc-900 border border-zinc-600 rounded-lg 
+                                   text-white text-sm focus:outline-none transition-colors resize-y min-h-[140px]
+                                   focus:border-amber-500"
+                          placeholder="Normal-looking page copy…"
+                        />
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={handleSave}
+                          className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors text-sm
+                                    bg-emerald-500 hover:bg-emerald-600 text-white"
+                        >
+                          <Save className="w-4 h-4" />
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setIsEditing(false)}
+                          className="flex items-center gap-2 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 
+                                   text-zinc-300 rounded-lg transition-colors text-sm"
+                        >
+                          <X className="w-4 h-4" />
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-zinc-500 text-xs">Message</span>
-                      <p className="text-sm whitespace-pre-wrap text-zinc-300">
-                        {selectedFile.content}
-                      </p>
-                    </div>
-                  </div>
-                )}
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap text-zinc-300 min-h-[4rem]">
+                      {selectedFile.content || (
+                        <span className="text-zinc-600 italic">No body text — click Edit to add.</span>
+                      )}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
           </div>

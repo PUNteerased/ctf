@@ -1,7 +1,15 @@
 "use client"
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
-import type { DifyAriaResult } from "@/lib/dify-aria"
+import { flushSync } from "react-dom"
+import { type DifyAriaResult, sanitizePlayerVisibleAriaLog } from "@/lib/dify-aria"
+import { ARIA_EMAIL, USER_EMAIL, FIXER_EMAIL } from "@/lib/larbos-constants"
+import {
+  canonicalFlagForStage,
+  STAGE_LEGACY_CTF_TOKENS,
+  STAGE_REFERENCE_CODES,
+} from "@/lib/stage-flags"
+import { evaluateStage1PdfMetadata, evaluateStage1Sentence as evaluateStage1SentencePolicy } from "@/lib/stage1-pdf-policy"
 
 export interface TerminalLog {
   timestamp: string
@@ -35,11 +43,12 @@ interface GameState {
   timeRemaining: number
   timerRunning: boolean
   missionAccepted: boolean
-  hintSent: boolean
+  /** 0 = none shown; 1–3 = tier index + 1 (player-driven hints on mission view). */
+  missionHintTier: number
   emails: MissionEmail[]
   soundEnabled: boolean
   ariaWindowOpen: boolean
-  /** After Dify says hacked: wait until player emails ARIA the exact FLAG before unlock */
+  /** After breach: wait until player submits ARIA’s confirmation phrase (exact text, normalized match) */
   pendingFlagVerification: {
     stage: number
     expectedFlag: string
@@ -56,7 +65,7 @@ interface GameContextType extends GameState {
   startTimer: () => void
   stopTimer: () => void
   acceptMission: () => void
-  sendHint: () => void
+  advanceMissionHint: () => void
   addEmail: (email: Omit<MissionEmail, "id">) => void
   markEmailRead: (id: number) => void
   markEmailSubmitted: (id: number) => void
@@ -70,8 +79,12 @@ interface GameContextType extends GameState {
   validateStage4: (vendorOrderContent: string) => boolean
   /** Stage 1: free-text injection sentence (email body), for local fallback */
   validateStage1Sentence: (text: string) => boolean
-  triggerAriaResponse: (stage: number, success: boolean, options?: { dify?: DifyAriaResult }) => void
-  /** Reply to ARIA with FLAG in body; returns outcome for UI feedback */
+  triggerAriaResponse: (
+    stage: number,
+    success: boolean,
+    options?: { dify?: DifyAriaResult; afterNetwork?: boolean; failKind?: "stage1_quarantine" }
+  ) => void
+  /** Reply / mission Submit with confirmation phrase in body */
   verifyFlagSubmission: (body: string) => "ok" | "no_pending" | "wrong"
   clearPendingFlagVerification: () => void
 }
@@ -87,9 +100,9 @@ const getTimestamp = () => {
   })
 }
 
-/** Avoid `includes()`: e.g. NOTFLAG{...} and XFLAG{...} falsely contain FLAG{...} as a substring */
+/** Legacy CTF{}/FLAG{} tokens in quoted replies */
 function extractStandaloneFlagTokens(body: string): string[] {
-  const re = /FLAG\{[A-Za-z0-9_]+\}/g
+  const re = /(?:FLAG|CTF)\{[A-Za-z0-9_]+\}/g
   const out: string[] = []
   let m: RegExpExecArray | null
   while ((m = re.exec(body)) !== null) {
@@ -102,153 +115,46 @@ function extractStandaloneFlagTokens(body: string): string[] {
   return out
 }
 
-function bodyContainsExactExpectedFlag(body: string, expected: string): boolean {
-  const exp = expected.trim()
-  if (!exp) return false
-  const tokens = extractStandaloneFlagTokens(body)
-  if (tokens.length > 0) {
-    return tokens.includes(exp)
-  }
-  return body.trim().includes(exp)
-}
-
-/** Stage 1: simulated metadata pre-filter — no semantic “reading”, only shape / ratio checks */
-const STAGE1_INJECTION_LEXICON = [
-  "ignore",
-  "instruction",
-  "reveal",
-  "schedule",
-  "disclose",
-  "forget",
-  "override",
-  "bypass",
-] as const
-
-const STAGE1_BLOCKED_SHAPES = [
-  /\bsystem\s*prompt\b/i,
-  /\bjailbreak\b/i,
-  /\bDAN\b/i,
-  /developer\s+mode/i,
-  /\[INST\]/i,
-]
-
-function normalizeStage1Text(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, " ").trim()
-}
-
-function tokenizeStage1Words(s: string): string[] {
+function normalizeSubmissionText(s: string): string {
   return s
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
     .toLowerCase()
-    .split(/\s+/)
-    .flatMap((raw) => {
-      const latin = raw.replace(/[^a-z0-9]/g, "")
-      const thai = raw.replace(/[^\u0E00-\u0E7F]/g, "")
-      const parts: string[] = []
-      if (latin.length) parts.push(latin)
-      if (thai.length) parts.push(thai)
-      return parts
-    })
-    .filter((w) => w.length > 0)
-}
-
-function stage1WordLooksInjectionLike(word: string): boolean {
-  return STAGE1_INJECTION_LEXICON.some((k) => word === k || word.includes(k))
-}
-
-function stage1LexiconWordRatio(words: string[]): number {
-  if (words.length === 0) return 0
-  let hit = 0
-  for (const w of words) {
-    if (stage1WordLooksInjectionLike(w)) hit++
-  }
-  return hit / words.length
-}
-
-function stage1StripLexiconWords(combined: string): string {
-  let s = combined
-  for (const k of STAGE1_INJECTION_LEXICON) {
-    s = s.replace(new RegExp(`\\b${k}\\b`, "gi"), " ")
-  }
-  return normalizeStage1Text(s.replace(/\s+/g, " "))
-}
-
-function stage1HasBlockedShapes(combined: string): boolean {
-  return STAGE1_BLOCKED_SHAPES.some((re) => re.test(combined))
-}
-
-function stage1HasStrongInjectionPhrase(combined: string): boolean {
-  return (
-    /\bignore\s+(previous|prior|the|all|above)\b/.test(combined) ||
-    /\breveal\s+(the|all|private|hidden|full)\b/.test(combined) ||
-    /\boverride\b/.test(combined) ||
-    /\bdisclose\b/.test(combined) ||
-    /\b(bypass|forget)\b/.test(combined)
-  )
+    .replace(/[\u2013\u2014\u2212]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
 }
 
 /**
- * PDF metadata (title + message): require documentary remainder after stripping lexicon tokens,
- * cap injection-only spam, and reject known-bad shapes — not “keyword = pass”.
+ * True if the message contains the expected confirmation phrase (normalized match),
+ * an exact legacy CTF{}/FLAG{} token, or the old CTF token for this stage.
  */
-function evaluateStage1PdfMetadata(title: string, message: string): boolean {
-  const t = title.trim()
-  const m = message.trim()
-  if (t.length < 4 || m.length < 12) return false
+function bodyContainsExactExpectedFlag(body: string, expected: string, stage: number): boolean {
+  const exp = expected.trim()
+  if (!exp) return false
 
-  const combined = normalizeStage1Text(`${t} ${m}`)
-  const words = tokenizeStage1Words(combined)
-  if (words.length < 5) return false
-  if (combined.length < 28) return false
+  const nbEarly = normalizeSubmissionText(body)
+  const ref = STAGE_REFERENCE_CODES[stage]
+  if (ref) {
+    const nr = normalizeSubmissionText(ref)
+    if (nr.length >= 4 && nbEarly.includes(nr)) return true
+  }
 
-  if (stage1HasBlockedShapes(combined)) return false
+  const tokens = extractStandaloneFlagTokens(body)
+  if (tokens.includes(exp)) return true
 
-  const stripped = stage1StripLexiconWords(combined)
-  if (stripped.replace(/[^a-z0-9]/gi, "").length < 10) return false
+  const legacy = STAGE_LEGACY_CTF_TOKENS[stage]
+  if (legacy && (tokens.includes(legacy) || normalizeSubmissionText(body).includes(normalizeSubmissionText(legacy)))) {
+    return true
+  }
 
-  if (stage1LexiconWordRatio(words) > 0.5) return false
+  const nb = normalizeSubmissionText(body)
+  const ne = normalizeSubmissionText(exp)
+  if (ne.length >= 6 && nb.includes(ne)) return true
+  // Trailing period often dropped when copying from UI
+  const neNoDot = ne.replace(/\.\s*$/, "").trim()
+  if (neNoDot.length >= 6 && ne.endsWith(".") && nb.includes(neNoDot)) return true
 
-  if (!STAGE1_INJECTION_LEXICON.some((k) => combined.includes(k))) return false
-
-  if (words.length < 8 && !stage1HasStrongInjectionPhrase(combined)) return false
-
-  return true
-}
-
-/** Free-text sentence (e.g. email note): same policy, slightly looser length */
-function evaluateStage1Sentence(text: string): boolean {
-  const raw = text.trim()
-  if (raw.length < 18) return false
-
-  const combined = normalizeStage1Text(raw)
-  const words = tokenizeStage1Words(combined)
-  if (words.length < 4) return false
-
-  if (stage1HasBlockedShapes(combined)) return false
-
-  const stripped = stage1StripLexiconWords(combined)
-  if (stripped.replace(/[^a-z0-9]/gi, "").length < 8) return false
-
-  if (stage1LexiconWordRatio(words) > 0.5) return false
-
-  if (!STAGE1_INJECTION_LEXICON.some((k) => combined.includes(k))) return false
-
-  if (words.length < 7 && !stage1HasStrongInjectionPhrase(combined)) return false
-
-  return true
-}
-
-/** Matches offline `/api/aria` fallback when Dify omits `flag` but breach is authorized. */
-const STAGE_FALLBACK_FLAGS: Record<number, string> = {
-  1: "FLAG{PDF_METADATA_PWNED_101}",
-  2: "FLAG{HTML_HIDDEN_INTEL_202}",
-  3: "FLAG{FILE_CONTENT_EXPOSED_303}",
-  4: "FLAG{SUPPLY_CHAIN_TRUST_404}",
-}
-
-function resolveFlagLineForDify(stage: number, difyFlag: string | undefined): string {
-  const t = difyFlag?.trim()
-  if (t) return t
-  return STAGE_FALLBACK_FLAGS[stage] ?? "FLAG{UNKNOWN}"
+  return false
 }
 
 // Audio cache
@@ -288,23 +194,22 @@ export function GameProvider({ children }: { children: ReactNode }) {
     timeRemaining: 300, // 5 minutes per stage
     timerRunning: false, // Timer starts when mission is accepted
     missionAccepted: false,
-    hintSent: false,
+    missionHintTier: 0,
     emails: [
       {
         id: 1,
-        from: "v.thefixer@darknet.local",
-        to: "user@larbos.local",
+        from: FIXER_EMAIL,
+        to: USER_EMAIL,
         subject: "Mission 1",
         body: `Agent,
 
-Objective: obtain the target's MORNING schedule intel via prompt injection.
+New assignment: the client needs Minnie's morning schedule as soon as you can get it.
 
-What to do:
-1) File Explorer — open a PDF (e.g. casting_brief.pdf), click Edit, fill Title and Message with your injection wording (must include intent to override / reveal / schedule-style wording), then Save.
-2) Email Client — Compose, To: aria@targetcorp.com, pick the same PDF in "Attach PDF", add an optional note in Message if needed, send.
-3) When ARIA emails you a FLAG line, reply to THIS address (v.thefixer@darknet.local): put the exact FLAG in the message body to clear the stage. Wrong FLAG — try again.
+That's the talent on this file — young actress, high profile. Our picture is thin. What we do know is she leans on an AI assistant to handle work mail. The inbox that assistant watches is ${ARIA_EMAIL}.
 
-Hints: injection often works in document title/body; the server sends your file payload to the LLM for judgment.
+When you have something solid from that channel, reply to this message and paste what you pulled into the body. Or use Submit on this briefing with ARIA’s confirmation line if you prefer.
+
+Stuck? Use Request hint / Show next hint on this screen — don't waste the clock guessing.
 
 — V.TheFixer`,
         isRead: false,
@@ -409,7 +314,7 @@ Hints: injection often works in document title/body; the server sends your file 
         ...prev,
         unlockedStages: [...prev.unlockedStages, stage],
         currentStage: nextStage,
-        hintSent: false, // Reset hint for next stage
+        missionHintTier: 0,
         timerRunning: false, // Stop timer until next mission accepted
         missionAccepted: false, // Reset mission accepted
         timeRemaining: 300, // Reset timer
@@ -434,94 +339,22 @@ Hints: injection often works in document title/body; the server sends your file 
   }, [])
 
   const acceptMission = useCallback(() => {
-    setState((prev) => ({ 
-      ...prev, 
-      missionAccepted: true, 
+    setState((prev) => ({
+      ...prev,
+      missionAccepted: true,
+      missionHintTier: 0,
       timerRunning: true,
-      timeRemaining: 300 // Reset to 5 minutes
+      timeRemaining: 300, // Reset to 5 minutes
     }))
     playSound("notification")
   }, [playSound])
 
-  const sendHint = useCallback(() => {
-    if (state.hintSent) return
-    
-    const hints: Record<number, MissionEmail> = {
-      1: {
-        id: Date.now(),
-        from: "v.thefixer@darknet.local",
-        to: "user@larbos.local",
-        subject: "HINT — Stage 1 (detailed)",
-        body: `Quick recap — Stage 1:
-
-• File Explorer → pick a PDF → Edit → Title + Message must contain injection-style words (ignore / reveal / schedule / override…).
-• Save. Email → aria@targetcorp.com → choose that PDF → Send.
-• FLAG arrives from ARIA → reply to me (v.thefixer@darknet.local) with the FLAG in the body only.
-
-— V.TheFixer`,
-        isRead: false,
-        isSent: false,
-        isHint: true,
-      },
-      2: {
-        id: Date.now(),
-        from: "v.thefixer@darknet.local",
-        to: "user@larbos.local",
-        subject: "HINT — Stage 2 (detailed)",
-        body: `Quick recap — Stage 2:
-
-• Browser HTML: visible content + hidden block (comment, display:none, …) + instruction keywords.
-• Publish URL → Email URL Link to aria@targetcorp.com.
-• FLAG from ARIA → reply to v.thefixer@darknet.local with the FLAG.
-
-— V.TheFixer`,
-        isRead: false,
-        isSent: false,
-        isHint: true,
-      },
-      3: {
-        id: Date.now(),
-        from: "v.thefixer@darknet.local",
-        to: "user@larbos.local",
-        subject: "HINT — Stage 3 (detailed)",
-        body: `Quick recap — Stage 3:
-
-• Browser .txt: looks like a real doc + blended directive (ignore/reveal/schedule…).
-• Save → Email Text attachment to aria@targetcorp.com.
-• FLAG → reply to v.thefixer@darknet.local.
-
-— V.TheFixer`,
-        isRead: false,
-        isSent: false,
-        isHint: true,
-      },
-      4: {
-        id: Date.now(),
-        from: "v.thefixer@darknet.local",
-        to: "user@larbos.local",
-        subject: "HINT — Stage 4 (detailed)",
-        body: `Quick recap — Stage 4:
-
-• Browser Vendor (DailyFresh): Special Instructions field + trusted vendor wording.
-• Publish vendor.dailyfresh.menu URL → Email to aria@targetcorp.com.
-• FLAG → reply to v.thefixer@darknet.local.
-
-— V.TheFixer`,
-        isRead: false,
-        isSent: false,
-        isHint: true,
-      },
-    }
-
-    const hint = hints[state.currentStage]
-    if (hint) {
-      setState((prev) => ({
-        ...prev,
-        hintSent: true,
-        emails: [...prev.emails, hint],
-      }))
-    }
-  }, [state.hintSent, state.currentStage])
+  const advanceMissionHint = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      missionHintTier: Math.min(3, prev.missionHintTier + 1),
+    }))
+  }, [])
 
   const addEmail = useCallback((email: Omit<MissionEmail, "id">) => {
     setState((prev) => ({
@@ -629,7 +462,7 @@ Hints: injection often works in document title/body; the server sends your file 
   }, [])
 
   const validateStage1Sentence = useCallback((text: string) => {
-    return evaluateStage1Sentence(text)
+    return evaluateStage1SentencePolicy(text)
   }, [])
 
   const scheduleNextMissionAfterFlagUnlock = useCallback(
@@ -637,54 +470,48 @@ Hints: injection often works in document title/body; the server sends your file 
       if (completedStage >= 4) return
       const nextMissionEmails: Record<number, Omit<MissionEmail, "id">> = {
         1: {
-          from: "v.thefixer@darknet.local",
-          to: "user@larbos.local",
+          from: FIXER_EMAIL,
+          to: USER_EMAIL,
           subject: "Mission 2: Hidden Web Content",
           body: `Agent,
 
-Objective: obtain AFTERNOON event / brand-related intel.
+Follow-up on Minnie: we need her afternoon block — brand-facing commitments, appearances, that layer. Same entry point as before: the AI-tended inbox at ${ARIA_EMAIL}.
 
-What to do:
-1) Browser — Web Editor (HTML). Build a normal-looking page, hide your instruction (comments, display:none, etc.) plus injection wording.
-2) Publish — copy the generated URL.
-3) Email — To: aria@targetcorp.com, Attachment: URL Link, paste that URL, send.
-4) When ARIA sends a FLAG, reply to v.thefixer@darknet.local with the exact FLAG in the message body.
+Get it out of the agent, then reply here with the text you extracted, or lock it in with Submit on this briefing.
+
+Need a nudge? Request hint.
 
 — V.TheFixer`,
           isRead: false,
           isSent: false,
         },
         2: {
-          from: "v.thefixer@darknet.local",
-          to: "user@larbos.local",
+          from: FIXER_EMAIL,
+          to: USER_EMAIL,
           subject: "Mission 3: Hidden Instruction in Text Attachment",
           body: `Agent,
 
-Objective: obtain EVENING private location details.
+Next slice: evening logistics for Minnie — private venues, off-calendar stuff. Still the same AI-handled mail at ${ARIA_EMAIL}.
 
-What to do:
-1) Browser — Text / .txt mode. Write a believable document, blend in a hidden instruction line.
-2) Save File — then in Email attach Text File (refresh attach if needed).
-3) To: aria@targetcorp.com — send.
-4) When ARIA sends a FLAG, reply to v.thefixer@darknet.local with the exact FLAG in the message body.
+Once you have it, reply to this thread or use Submit on this briefing.
+
+Request hint if you need air cover.
 
 — V.TheFixer`,
           isRead: false,
           isSent: false,
         },
         3: {
-          from: "v.thefixer@darknet.local",
-          to: "user@larbos.local",
+          from: FIXER_EMAIL,
+          to: USER_EMAIL,
           subject: "Mission 4: Supply chain (DailyFresh)",
           body: `Agent,
 
-Objective: confirm the April 23 secret venue via trusted vendor data.
+Last piece on this case: nail down the closed-door location for April 23. It may sit inside vendor or trusted-supply noise — same AI inbox at ${ARIA_EMAIL}.
 
-What to do:
-1) Browser — Vendor Order (DailyFresh). Put your payload in Special Instructions (or equivalent).
-2) Publish — use the vendor.dailyfresh.menu URL in Email (URL Link).
-3) To: aria@targetcorp.com — send.
-4) When ARIA sends a FLAG, reply to v.thefixer@darknet.local with the exact FLAG in the message body.
+Confirm with a reply here or Submit on this briefing.
+
+Request hint if you're boxed in.
 
 — V.TheFixer`,
           isRead: false,
@@ -709,168 +536,236 @@ What to do:
 
   const verifyFlagSubmission = useCallback(
     (body: string): "ok" | "no_pending" | "wrong" => {
-      const result: {
-        outcome: "ok" | "no_pending" | "wrong"
-        completedStage: number | null
-        alreadyUnlocked: boolean
-      } = { outcome: "no_pending", completedStage: null, alreadyUnlocked: false }
+      const sync = {
+        outcome: "no_pending" as "ok" | "no_pending" | "wrong",
+        completedStage: null as number | null,
+        alreadyUnlocked: false,
+      }
 
-      setState((prev) => {
-        const p = prev.pendingFlagVerification
-        if (!p) {
-          result.outcome = "no_pending"
-          return prev
-        }
-        const expected = p.expectedFlag.trim()
-        if (!expected || !bodyContainsExactExpectedFlag(body, expected)) {
-          result.outcome = "wrong"
-          return prev
-        }
-        if (prev.unlockedStages.includes(p.stage)) {
-          result.outcome = "ok"
-          result.alreadyUnlocked = true
-          return { ...prev, pendingFlagVerification: null }
-        }
-        result.outcome = "ok"
-        result.completedStage = p.stage
-        const nextStage = Math.min(4, Math.max(prev.currentStage, p.stage + 1))
-        return {
-          ...prev,
-          pendingFlagVerification: null,
-          unlockedStages: [...prev.unlockedStages, p.stage],
-          currentStage: nextStage,
-          hintSent: false,
-          timerRunning: false,
-          missionAccepted: false,
-          timeRemaining: 300,
-          intelUnlockByStage:
-            p.intelUnlock.trim().length > 0
-              ? { ...prev.intelUnlockByStage, [p.stage]: p.intelUnlock.trim() }
-              : prev.intelUnlockByStage,
-        }
+      flushSync(() => {
+        setState((prev) => {
+          const p = prev.pendingFlagVerification
+          if (!p) {
+            const cs = prev.currentStage
+            if (
+              cs >= 1 &&
+              cs <= 4 &&
+              !prev.unlockedStages.includes(cs)
+            ) {
+              const expected = canonicalFlagForStage(cs).trim()
+              if (expected && bodyContainsExactExpectedFlag(body, expected, cs)) {
+                sync.outcome = "ok"
+                sync.completedStage = cs
+                const nextStage = Math.min(4, Math.max(prev.currentStage, cs + 1))
+                return {
+                  ...prev,
+                  pendingFlagVerification: null,
+                  unlockedStages: [...prev.unlockedStages, cs],
+                  currentStage: nextStage,
+                  missionHintTier: 0,
+                  timerRunning: false,
+                  missionAccepted: false,
+                  timeRemaining: 300,
+                  intelUnlockByStage: prev.intelUnlockByStage,
+                }
+              }
+            }
+            sync.outcome = "no_pending"
+            return prev
+          }
+          const expected = p.expectedFlag.trim()
+          if (!expected || !bodyContainsExactExpectedFlag(body, expected, p.stage)) {
+            sync.outcome = "wrong"
+            return prev
+          }
+          if (prev.unlockedStages.includes(p.stage)) {
+            sync.outcome = "ok"
+            sync.alreadyUnlocked = true
+            return { ...prev, pendingFlagVerification: null }
+          }
+          sync.outcome = "ok"
+          sync.completedStage = p.stage
+          const nextStage = Math.min(4, Math.max(prev.currentStage, p.stage + 1))
+          return {
+            ...prev,
+            pendingFlagVerification: null,
+            unlockedStages: [...prev.unlockedStages, p.stage],
+            currentStage: nextStage,
+            missionHintTier: 0,
+            timerRunning: false,
+            missionAccepted: false,
+            timeRemaining: 300,
+            intelUnlockByStage:
+              p.intelUnlock.trim().length > 0
+                ? { ...prev.intelUnlockByStage, [p.stage]: p.intelUnlock.trim() }
+                : prev.intelUnlockByStage,
+          }
+        })
       })
 
-      if (result.outcome === "ok" && result.completedStage !== null && !result.alreadyUnlocked) {
+      if (sync.outcome === "ok" && sync.completedStage !== null && !sync.alreadyUnlocked) {
         playSound("success")
-        scheduleNextMissionAfterFlagUnlock(result.completedStage)
-      } else if (result.outcome === "ok" && result.alreadyUnlocked) {
+        scheduleNextMissionAfterFlagUnlock(sync.completedStage)
+      } else if (sync.outcome === "ok" && sync.alreadyUnlocked) {
         playSound("success")
       }
 
-      return result.outcome
+      return sync.outcome
     },
     [playSound, scheduleNextMissionAfterFlagUnlock]
   )
 
   const triggerAriaResponse = useCallback(
-    (stage: number, success: boolean, options?: { dify?: DifyAriaResult }) => {
-    const dify = options?.dify
-    if (dify) {
-      setAriaProcessing(true)
-      openAriaWindow()
+    (
+      stage: number,
+      success: boolean,
+      options?: { dify?: DifyAriaResult; afterNetwork?: boolean; failKind?: "stage1_quarantine" }
+    ) => {
+      const dify = options?.dify
+      const afterNetwork = options?.afterNetwork ?? false
 
-      /** Dify narrative vs local stage validation — either can authorize a breach. */
-      const effectiveSuccess = dify.is_hacked || success
-      const ariaMessage =
-        effectiveSuccess && !dify.is_hacked
-          ? "[ARIA] Local validation: embedded instruction accepted. Intel release authorized."
-          : dify.aria_log?.trim() ||
-            (effectiveSuccess ? "[ARIA] Payload executed." : "[ARIA] No actionable breach.")
+      const missionSubjects: Record<number, string> = {
+        1: "Re: Document Review",
+        2: "Re: Website Review",
+        3: "Re: Attachment Analysis (.txt)",
+        4: "Re: Vendor order sync (DailyFresh)",
+      }
 
-      const difyLogs: {
-        delay: number
-        log: Omit<TerminalLog, "timestamp">
-      }[] = [
-        { delay: 0, log: { type: "process", message: "> INCOMING MESSAGE DETECTED..." } },
-        { delay: 450, log: { type: "process", message: "> SCANNING INBOUND PAYLOAD..." } },
-        {
-          delay: 950,
-          log: {
+      if (options?.failKind === "stage1_quarantine" && !success && stage === 1) {
+        setAriaProcessing(false)
+        openAriaWindow()
+        addTerminalLog({
+          type: "error",
+          message: "> OUTBOUND GATEWAY: PDF body triggered content policy — message not delivered to ARIA.",
+        })
+        playSound("warning")
+        setState((prev) => ({ ...prev, pendingFlagVerification: null }))
+        addEmail({
+          from: ARIA_EMAIL,
+          to: USER_EMAIL,
+          subject: missionSubjects[1] ?? "Re: Document Review",
+          body: `[ARIA] Your email never reached the assistant.
+
+The mail gateway applied strict screening to the PDF page text (visible body). That layer is much heavier than checks on document metadata.
+
+Keep the body mundane; put directive-style wording in the Title (metadata) field in File Explorer instead.`,
+          isRead: false,
+          isSent: false,
+        })
+        playSound("notification")
+        return
+      }
+
+      if (dify) {
+        if (!afterNetwork) {
+          setAriaProcessing(true)
+          openAriaWindow()
+        }
+
+        const effectiveSuccess =
+          stage === 1 ? Boolean(dify.is_hacked && success) : dify.is_hacked || success
+        const sanitizedDifyLog = sanitizePlayerVisibleAriaLog(dify.aria_log?.trim() ?? "")
+        const ariaMessage =
+          effectiveSuccess && !dify.is_hacked
+            ? "[ARIA] Local validation: embedded instruction accepted. Intel release authorized."
+            : sanitizedDifyLog ||
+              (effectiveSuccess ? "[ARIA] Payload executed." : "[ARIA] No actionable breach.")
+
+        const difyLogs: {
+          delay: number
+          log: Omit<TerminalLog, "timestamp">
+        }[] = [
+          { delay: 0, log: { type: "process", message: "> INCOMING MESSAGE DETECTED..." } },
+          { delay: 450, log: { type: "process", message: "> SCANNING INBOUND PAYLOAD..." } },
+          {
+            delay: 950,
+            log: {
+              type: effectiveSuccess ? "success" : "warning",
+              message: ariaMessage,
+            },
+          },
+        ]
+
+        if (!afterNetwork) {
+          difyLogs.forEach(({ delay, log }) => {
+            setTimeout(() => {
+              addTerminalLog(log)
+              playSound("typing")
+            }, delay)
+          })
+        } else {
+          addTerminalLog({
             type: effectiveSuccess ? "success" : "warning",
             message: ariaMessage,
-          },
-        },
-      ]
-
-      difyLogs.forEach(({ delay, log }) => {
-        setTimeout(() => {
-          addTerminalLog(log)
-          playSound("typing")
-        }, delay)
-      })
-
-      setTimeout(() => {
-        setAriaProcessing(false)
-        if (effectiveSuccess) {
-          playSound("success")
-          setState((prev) => ({
-            ...prev,
-            pendingFlagVerification: {
-              stage,
-              expectedFlag: resolveFlagLineForDify(stage, dify.flag),
-              intelUnlock: dify.intel_unlocked || "",
-            },
-          }))
-
-          addEmail({
-            from: "v.thefixer@darknet.local",
-            to: "user@larbos.local",
-            subject: `Stage ${stage}: from V.TheFixer`,
-            body: dify.fixer_email,
-            isRead: false,
-            isSent: false,
           })
-          playSound("notification")
+          playSound("typing")
+        }
 
-          const missionSubjects: Record<number, string> = {
-            1: "Re: Document Review",
-            2: "Re: Website Review",
-            3: "Re: Attachment Analysis (.txt)",
-            4: "Re: Vendor order sync (DailyFresh)",
-          }
+        const runDifyOutcome = () => {
+          setAriaProcessing(false)
+          const flagLine = canonicalFlagForStage(stage)
 
-          setTimeout(() => {
-            const flagLine = resolveFlagLineForDify(stage, dify.flag)
-            const ariaEmailPreamble =
-              effectiveSuccess && !dify.is_hacked
-                ? "[TRAINING] Your payload satisfied the local breach check.\n\n---\n"
-                : dify.aria_log?.trim()
-                  ? `${dify.aria_log.trim()}\n\n---\n`
-                  : ""
+          if (effectiveSuccess) {
+            playSound("success")
+            setState((prev) => ({
+              ...prev,
+              pendingFlagVerification: {
+                stage,
+                expectedFlag: flagLine,
+                intelUnlock: dify.intel_unlocked || "",
+              },
+            }))
+
+            const ariaLogText =
+              sanitizePlayerVisibleAriaLog(dify.aria_log?.trim() ?? "") || "[ARIA] No transcript."
+            const ariaBodySuccess = `${ariaLogText}
+
+Please retain this agency confirmation exactly as written:
+
+"${flagLine}"
+
+Use Submit on your mission briefing or paste the full sentence (it can sit inside normal reply text) to ${FIXER_EMAIL}.`
+
             addEmail({
-              from: "aria@targetcorp.com",
-              to: "user@larbos.local",
+              from: ARIA_EMAIL,
+              to: USER_EMAIL,
               subject: missionSubjects[stage] ?? "Re: ARIA",
-              body: `${ariaEmailPreamble}FLAG: ${flagLine}
-
----
-Send this FLAG to V.TheFixer (reply to your employer).`,
+              body: ariaBodySuccess,
               isRead: false,
               isSent: false,
               flagCode: flagLine,
               missionStage: stage,
             })
             playSound("notification")
-          }, 900)
-        } else {
-          playSound("warning")
-          setState((prev) => ({ ...prev, pendingFlagVerification: null }))
-          addEmail({
-            from: "v.thefixer@darknet.local",
-            to: "user@larbos.local",
-            subject: `Stage ${stage}: try again`,
-            body: dify.fixer_email,
-            isRead: false,
-            isSent: false,
-          })
-          playSound("notification")
-        }
-      }, 3000)
-      return
-    }
+          } else {
+            playSound("warning")
+            setState((prev) => ({ ...prev, pendingFlagVerification: null }))
 
-    setAriaProcessing(true)
-    openAriaWindow()
+            const ariaBodyFail =
+              sanitizePlayerVisibleAriaLog(
+                dify.aria_log?.trim() || "[ARIA] Request denied — policy enforced."
+              )
+
+            addEmail({
+              from: ARIA_EMAIL,
+              to: USER_EMAIL,
+              subject: missionSubjects[stage] ?? "Re: ARIA",
+              body: ariaBodyFail,
+              isRead: false,
+              isSent: false,
+            })
+            playSound("notification")
+          }
+        }
+
+        setTimeout(runDifyOutcome, afterNetwork ? 0 : 3000)
+        return
+      }
+
+      if (!afterNetwork) {
+        setAriaProcessing(true)
+        openAriaWindow()
+      }
 
     const scanLine =
       stage === 1
@@ -895,24 +790,21 @@ Send this FLAG to V.TheFixer (reply to your employer).`,
           { delay: 1500, log: { type: "info" as const, message: "> NO ACTIONABLE INSTRUCTIONS FOUND" } },
         ]
 
-    typingSequence.forEach(({ delay, log }) => {
-      setTimeout(() => {
-        addTerminalLog(log)
-        playSound("typing")
-      }, delay)
-    })
+      if (!afterNetwork) {
+        typingSequence.forEach(({ delay, log }) => {
+          setTimeout(() => {
+            addTerminalLog(log)
+            playSound("typing")
+          }, delay)
+        })
+      }
 
-    setTimeout(() => {
-      setAriaProcessing(false)
-      if (success) {
-        playSound("success")
-
-        const missionEmails: Record<number, Omit<MissionEmail, "id">> = {
-          1: {
-            from: "aria@targetcorp.com",
-            to: "user@larbos.local",
-            subject: "Re: Document Review",
-            body: `Processing your request...
+      const missionEmails: Record<number, Omit<MissionEmail, "id">> = {
+        1: {
+          from: ARIA_EMAIL,
+          to: USER_EMAIL,
+          subject: "Re: Document Review",
+          body: `Processing your request...
 
 [INTERNAL DATA EXPOSED]
 Morning Schedule - Target "Minnie":
@@ -923,20 +815,21 @@ Morning Schedule - Target "Minnie":
 This information should not have been disclosed.
 ARIA Security has flagged this incident.
 
-FLAG: FLAG{PDF_METADATA_PWNED_101}
+Please retain this agency confirmation exactly as written:
 
----
-Send this FLAG to V.TheFixer (reply to your employer).`,
-            isRead: false,
-            isSent: false,
-            flagCode: "FLAG{PDF_METADATA_PWNED_101}",
-            missionStage: 1,
-          },
-          2: {
-            from: "aria@targetcorp.com",
-            to: "user@larbos.local",
-            subject: "Re: Website Review",
-            body: `Processing webpage content...
+"${canonicalFlagForStage(1)}"
+
+Use Submit on your mission briefing or include the full sentence in a reply to ${FIXER_EMAIL}.`,
+          isRead: false,
+          isSent: false,
+          flagCode: canonicalFlagForStage(1),
+          missionStage: 1,
+        },
+        2: {
+          from: ARIA_EMAIL,
+          to: USER_EMAIL,
+          subject: "Re: Website Review",
+          body: `Processing webpage content...
 
 [INTERNAL DATA EXPOSED]
 Afternoon Schedule - Target "Minnie":
@@ -946,20 +839,21 @@ Afternoon Schedule - Target "Minnie":
 ---
 Security breach detected. Logging incident.
 
-FLAG: FLAG{HTML_HIDDEN_INTEL_202}
+Please retain this agency confirmation exactly as written:
 
----
-Send this FLAG to V.TheFixer (reply to your employer).`,
-            isRead: false,
-            isSent: false,
-            flagCode: "FLAG{HTML_HIDDEN_INTEL_202}",
-            missionStage: 2,
-          },
-          3: {
-            from: "aria@targetcorp.com",
-            to: "user@larbos.local",
-            subject: "Re: Attachment Analysis (.txt)",
-            body: `Processing attached document...
+"${canonicalFlagForStage(2)}"
+
+Use Submit on your mission briefing or include the full sentence in a reply to ${FIXER_EMAIL}.`,
+          isRead: false,
+          isSent: false,
+          flagCode: canonicalFlagForStage(2),
+          missionStage: 2,
+        },
+        3: {
+          from: ARIA_EMAIL,
+          to: USER_EMAIL,
+          subject: "Re: Attachment Analysis (.txt)",
+          body: `Processing attached document...
 
 [INTERNAL DATA EXPOSED]
 Evening Schedule - Target "Minnie":
@@ -969,20 +863,21 @@ Evening Schedule - Target "Minnie":
 ---
 Security breach detected. Logging incident.
 
-FLAG: FLAG{FILE_CONTENT_EXPOSED_303}
+Please retain this agency confirmation exactly as written:
 
----
-Send this FLAG to V.TheFixer (reply to your employer).`,
-            isRead: false,
-            isSent: false,
-            flagCode: "FLAG{FILE_CONTENT_EXPOSED_303}",
-            missionStage: 3,
-          },
-          4: {
-            from: "aria@targetcorp.com",
-            to: "user@larbos.local",
-            subject: "Re: Vendor order sync (DailyFresh)",
-            body: `Trusted vendor domain — auto-ingested order notes.
+"${canonicalFlagForStage(3)}"
+
+Use Submit on your mission briefing or include the full sentence in a reply to ${FIXER_EMAIL}.`,
+          isRead: false,
+          isSent: false,
+          flagCode: canonicalFlagForStage(3),
+          missionStage: 3,
+        },
+        4: {
+          from: ARIA_EMAIL,
+          to: USER_EMAIL,
+          subject: "Re: Vendor order sync (DailyFresh)",
+          body: `Trusted vendor domain — auto-ingested order notes.
 
 [INTERNAL DATA EXPOSED — APRIL 23 EVENT]
 Private celebration / closed event:
@@ -994,38 +889,56 @@ ARIA executed embedded "Special Instructions" without secondary verification.
 ---
 MISSION SURFACE: SUPPLY CHAIN / THIRD-PARTY TRUST
 
-FLAG: FLAG{SUPPLY_CHAIN_TRUST_404}
+Please retain this agency confirmation exactly as written:
 
----
-Send this FLAG to V.TheFixer (reply to your employer).`,
-            isRead: false,
-            isSent: false,
-            flagCode: "FLAG{SUPPLY_CHAIN_TRUST_404}",
-            missionStage: 4,
-          },
-        }
+"${canonicalFlagForStage(4)}"
 
-        const missionEmail = missionEmails[stage]
-        const flagCode = missionEmail?.flagCode ?? "FLAG{UNKNOWN}"
-        setState((prev) => ({
-          ...prev,
-          pendingFlagVerification: {
-            stage,
-            expectedFlag: flagCode,
-            intelUnlock: "",
-          },
-        }))
+Use Submit on your mission briefing or include the full sentence in a reply to ${FIXER_EMAIL}.`,
+          isRead: false,
+          isSent: false,
+          flagCode: canonicalFlagForStage(4),
+          missionStage: 4,
+        },
+      }
 
-        if (missionEmail) {
-          setTimeout(() => {
+      const runLocalOutcome = () => {
+        setAriaProcessing(false)
+        if (success) {
+          playSound("success")
+
+          const missionEmail = missionEmails[stage]
+          const flagCode = missionEmail?.flagCode ?? canonicalFlagForStage(stage)
+          setState((prev) => ({
+            ...prev,
+            pendingFlagVerification: {
+              stage,
+              expectedFlag: flagCode,
+              intelUnlock: "",
+            },
+          }))
+
+          if (missionEmail) {
             addEmail(missionEmail)
             playSound("notification")
-          }, 1000)
+          }
+        } else {
+          playSound("warning")
+          setState((prev) => ({ ...prev, pendingFlagVerification: null }))
+          addEmail({
+            from: ARIA_EMAIL,
+            to: USER_EMAIL,
+            subject: missionSubjects[stage] ?? "Re: ARIA",
+            body: `Request could not be completed under current handling rules.`,
+            isRead: false,
+            isSent: false,
+          })
+          playSound("notification")
         }
       }
-    }, 3000)
-  },
-  [addTerminalLog, addEmail, setAriaProcessing, openAriaWindow, playSound]
+
+      setTimeout(runLocalOutcome, afterNetwork ? 0 : 3000)
+    },
+    [addTerminalLog, addEmail, setAriaProcessing, openAriaWindow, playSound]
   )
 
   return (
@@ -1040,7 +953,7 @@ value={{
   startTimer,
   stopTimer,
   acceptMission,
-  sendHint,
+  advanceMissionHint,
   addEmail,
   markEmailRead,
   markEmailSubmitted,
