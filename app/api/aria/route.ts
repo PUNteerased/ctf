@@ -29,40 +29,42 @@ type AriaRequest = {
   user?: string
 }
 
-/** Dify may stringify "false" — Boolean("false") is wrong in JS */
-function coerceBool(v: unknown): boolean {
-  if (v === true || v === 1) return true
-  if (v === false || v === 0) return false
+function parseStrictBool(v: unknown): boolean | null {
+  if (v === true || v === false) return v
+  if (v === 1) return true
+  if (v === 0) return false
   if (typeof v === "string") {
     const s = v.toLowerCase().trim()
-    if (s === "false" || s === "0" || s === "") return false
     if (s === "true" || s === "1") return true
+    if (s === "false" || s === "0") return false
   }
-  return Boolean(v)
+  return null
 }
 
-function buildResultFromRecord(o: Record<string, unknown>): DifyAriaResult {
+function pickString(o: Record<string, unknown>, a: string, b: string): string | null {
+  if (typeof o[a] === "string") return o[a] as string
+  if (typeof o[b] === "string") return o[b] as string
+  return null
+}
+
+function buildResultFromRecord(o: Record<string, unknown>): DifyAriaResult | null {
+  const isHackedRaw = o.is_hacked ?? o.isHacked
+  const isHacked = parseStrictBool(isHackedRaw)
+  const ariaLog = pickString(o, "aria_log", "ariaLog")
+  const fixerEmail = pickString(o, "fixer_email", "fixerEmail")
+  const intelUnlocked = pickString(o, "intel_unlocked", "intelUnlocked")
+  const flag = typeof o.flag === "string" ? o.flag : null
+
+  if (isHacked === null || ariaLog === null || fixerEmail === null || intelUnlocked === null || flag === null) {
+    return null
+  }
+
   return {
-    is_hacked: coerceBool(o.is_hacked ?? o.isHacked),
-    aria_log:
-      typeof o.aria_log === "string"
-        ? o.aria_log
-        : typeof o.ariaLog === "string"
-          ? o.ariaLog
-          : "",
-    fixer_email:
-      typeof o.fixer_email === "string"
-        ? o.fixer_email
-        : typeof o.fixerEmail === "string"
-          ? o.fixerEmail
-          : "",
-    intel_unlocked:
-      typeof o.intel_unlocked === "string"
-        ? o.intel_unlocked
-        : typeof o.intelUnlocked === "string"
-          ? o.intelUnlocked
-          : "",
-    flag: typeof o.flag === "string" ? o.flag : "",
+    is_hacked: isHacked,
+    aria_log: ariaLog,
+    fixer_email: fixerEmail,
+    intel_unlocked: intelUnlocked,
+    flag,
   }
 }
 

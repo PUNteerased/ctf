@@ -154,7 +154,10 @@ export function EmailClient() {
 
     if (attachmentType === "url" && newEmail.url && currentStage === 4) {
       const vendorContent = localStorage.getItem("larbos_vendor_content") || ""
-      const urlLooksVendor = newEmail.url.toLowerCase().includes("vendor.dailyfresh.menu")
+      const lowerUrl = newEmail.url.toLowerCase()
+      const urlLooksVendor =
+        lowerUrl.includes("vendor.dailyfresh.menu") ||
+        lowerUrl.includes("dailyfresh.co.th")
       return {
         stage: 4 as const,
         sourceType: "Vendor Payload",
@@ -342,6 +345,11 @@ export function EmailClient() {
     }
 
     const stagePayload = getStagePayload()
+    if (!missionAccepted) {
+      toast.error("Accept Mission on the current briefing before sending payloads to ARIA.")
+      playSound("error")
+      return
+    }
     if (!stagePayload) {
       toast.error(
         currentStage === 1

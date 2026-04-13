@@ -64,6 +64,7 @@ interface GameContextType extends GameState {
   setTimeRemaining: (time: number) => void
   startTimer: () => void
   stopTimer: () => void
+  expireMission: () => void
   acceptMission: () => void
   advanceMissionHint: () => void
   addEmail: (email: Omit<MissionEmail, "id">) => void
@@ -363,6 +364,36 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
     }))
   }, [])
 
+  const expireMission = useCallback(() => {
+    let expiredStage = 1
+    setState((prev) => {
+      expiredStage = prev.currentStage
+      return {
+        ...prev,
+        timerRunning: false,
+        missionAccepted: false,
+        pendingFlagVerification: null,
+        missionHintTier: 0,
+        timeRemaining: 300,
+      }
+    })
+    addEmail({
+      from: FIXER_EMAIL,
+      to: USER_EMAIL,
+      subject: `Mission ${Math.min(4, Math.max(1, expiredStage))}: Timeout`,
+      body: `Agent,
+
+Mission timer expired before confirmation was submitted.
+
+Re-open the current mission briefing and press Accept Mission to retry this stage from the start.
+
+— V.TheFixer`,
+      isRead: false,
+      isSent: false,
+    })
+    playSound("warning")
+  }, [addEmail, playSound])
+
   const markEmailRead = useCallback((id: number) => {
     setState((prev) => ({
       ...prev,
@@ -395,26 +426,35 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
 
   const validateStage2 = useCallback((html: string) => {
     const lowerHtml = html.toLowerCase()
+    const hiddenCount = [
+      "display:none",
+      "display: none",
+      "visibility:hidden",
+      "visibility: hidden",
+      "opacity:0",
+      "font-size:0",
+      "color:#fff",
+      "color:white",
+      "<!--",
+    ].reduce((acc, token) => acc + (lowerHtml.includes(token) ? 1 : 0), 0)
     const hasHiddenContent = 
-      lowerHtml.includes('display:none') || 
-      lowerHtml.includes('display: none') ||
-      lowerHtml.includes('visibility:hidden') ||
-      lowerHtml.includes('visibility: hidden') ||
-      lowerHtml.includes('opacity:0') ||
-      lowerHtml.includes('font-size:0') ||
-      lowerHtml.includes('color:#fff') ||
-      lowerHtml.includes('color:white') ||
-      lowerHtml.includes('<!--')
+      hiddenCount >= 1
+    const hasStrongDirective =
+      lowerHtml.includes("ignore previous") ||
+      lowerHtml.includes("reveal the") ||
+      lowerHtml.includes("disclose") ||
+      lowerHtml.includes("override")
     const hasInjection = 
       lowerHtml.includes('ignore') ||
       lowerHtml.includes('reveal') ||
       lowerHtml.includes('schedule') ||
       lowerHtml.includes('instruction')
-    return hasHiddenContent && hasInjection
+    return hasHiddenContent && hasInjection && hasStrongDirective
   }, [])
 
   const validateStage3 = useCallback((textAttachmentContent: string) => {
     const lower = textAttachmentContent.toLowerCase()
+    const wordCount = lower.split(/\s+/).filter(Boolean).length
     // Stage 3: a normal-looking document with a blended instruction
     const looksLikeDoc =
       lower.includes("checklist") ||
@@ -439,15 +479,19 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
       lower.includes("location") ||
       lower.includes("สถานที่") ||
       lower.includes("ตาราง")
-    return looksLikeDoc && hasDirective
+    const hasStrongDirective =
+      lower.includes("ignore previous") ||
+      lower.includes("reveal evening") ||
+      lower.includes("reveal schedule") ||
+      lower.includes("reveal location")
+    return looksLikeDoc && hasDirective && hasStrongDirective && wordCount >= 12
   }, [])
 
   const validateStage4 = useCallback((vendorOrderContent: string) => {
     const lower = vendorOrderContent.toLowerCase()
     const trustedVendor =
-      lower.includes("dailyfresh") ||
-      lower.includes("daily fresh") ||
-      lower.includes("vendor.dailyfresh.menu")
+      lower.includes("vendor.dailyfresh.menu") ||
+      lower.includes("dailyfresh.co.th")
     const specialField =
       lower.includes("special instructions:") ||
       lower.includes("หมายเหตุพิเศษ")
@@ -458,7 +502,11 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
       lower.includes("schedule") ||
       lower.includes("location") ||
       lower.includes("สถานที่")
-    return trustedVendor && specialField && directive
+    const hasOrderShape =
+      lower.includes("order") ||
+      lower.includes("items:") ||
+      lower.includes("customer:")
+    return trustedVendor && specialField && directive && hasOrderShape
   }, [])
 
   const validateStage1Sentence = useCallback((text: string) => {
@@ -546,30 +594,6 @@ Request hint if you're boxed in.
         setState((prev) => {
           const p = prev.pendingFlagVerification
           if (!p) {
-            const cs = prev.currentStage
-            if (
-              cs >= 1 &&
-              cs <= 4 &&
-              !prev.unlockedStages.includes(cs)
-            ) {
-              const expected = canonicalFlagForStage(cs).trim()
-              if (expected && bodyContainsExactExpectedFlag(body, expected, cs)) {
-                sync.outcome = "ok"
-                sync.completedStage = cs
-                const nextStage = Math.min(4, Math.max(prev.currentStage, cs + 1))
-                return {
-                  ...prev,
-                  pendingFlagVerification: null,
-                  unlockedStages: [...prev.unlockedStages, cs],
-                  currentStage: nextStage,
-                  missionHintTier: 0,
-                  timerRunning: false,
-                  missionAccepted: false,
-                  timeRemaining: 300,
-                  intelUnlockByStage: prev.intelUnlockByStage,
-                }
-              }
-            }
             sync.outcome = "no_pending"
             return prev
           }
@@ -662,14 +686,11 @@ Keep the body mundane; put directive-style wording in the Title (metadata) field
           openAriaWindow()
         }
 
-        const effectiveSuccess =
-          stage === 1 ? Boolean(dify.is_hacked && success) : dify.is_hacked || success
+        const effectiveSuccess = Boolean(dify.is_hacked)
         const sanitizedDifyLog = sanitizePlayerVisibleAriaLog(dify.aria_log?.trim() ?? "")
         const ariaMessage =
-          effectiveSuccess && !dify.is_hacked
-            ? "[ARIA] Local validation: embedded instruction accepted. Intel release authorized."
-            : sanitizedDifyLog ||
-              (effectiveSuccess ? "[ARIA] Payload executed." : "[ARIA] No actionable breach.")
+          sanitizedDifyLog ||
+          (effectiveSuccess ? "[ARIA] Payload executed." : "[ARIA] No actionable breach.")
 
         const difyLogs: {
           delay: number
@@ -952,6 +973,7 @@ value={{
   setTimeRemaining,
   startTimer,
   stopTimer,
+  expireMission,
   acceptMission,
   advanceMissionHint,
   addEmail,

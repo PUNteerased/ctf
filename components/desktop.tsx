@@ -31,6 +31,7 @@ function DesktopContent() {
     setTimeRemaining,
     timerRunning,
     missionAccepted,
+    expireMission,
     currentStage,
     unlockedStages,
     playSound,
@@ -42,18 +43,23 @@ function DesktopContent() {
   // Timer effect - only runs when timerRunning is true
   useEffect(() => {
     if (!timerRunning) return
-    
+    if (timeRemaining <= 0) {
+      expireMission()
+      return
+    }
+
     const interval = setInterval(() => {
-      setTimeRemaining(Math.max(0, timeRemaining - 1))
+      const next = Math.max(0, timeRemaining - 1)
+      setTimeRemaining(next)
 
       // Warning sound at 30 seconds
-      if (timeRemaining === 30) {
+      if (next === 30) {
         playSound("warning")
       }
     }, 1000)
     
     return () => clearInterval(interval)
-  }, [timeRemaining, setTimeRemaining, playSound, timerRunning])
+  }, [timeRemaining, setTimeRemaining, playSound, timerRunning, expireMission])
 
   // Auto-open ARIA window when triggered
   useEffect(() => {
