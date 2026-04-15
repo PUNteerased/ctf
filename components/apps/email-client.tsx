@@ -79,6 +79,49 @@ export function EmailClient() {
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
   const [missionFlagInput, setMissionFlagInput] = useState("")
   const [missionFlagStatus, setMissionFlagStatus] = useState<"idle" | "incorrect" | "pending_none">("idle")
+  const isMountedRef = useRef(true)
+  const sendingRef = useRef(false)
+  const activeRequestRef = useRef<AbortController | null>(null)
+  const uiTimeoutIdsRef = useRef<Set<number>>(new Set())
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+      activeRequestRef.current?.abort()
+      uiTimeoutIdsRef.current.forEach((id) => window.clearTimeout(id))
+      uiTimeoutIdsRef.current.clear()
+    }
+  }, [])
+
+  const scheduleUiTimeout = (fn: () => void, delayMs: number) => {
+    const timeoutId = window.setTimeout(() => {
+      uiTimeoutIdsRef.current.delete(timeoutId)
+      if (!isMountedRef.current) return
+      fn()
+    }, delayMs)
+    uiTimeoutIdsRef.current.add(timeoutId)
+  }
+
+  const parseDifyResult = (payload: unknown): DifyAriaResult | null => {
+    if (typeof payload !== "object" || payload === null) return null
+    const v = payload as Record<string, unknown>
+    if (
+      typeof v.is_hacked !== "boolean" ||
+      typeof v.aria_log !== "string" ||
+      typeof v.fixer_email !== "string" ||
+      typeof v.intel_unlocked !== "string" ||
+      typeof v.flag !== "string"
+    ) {
+      return null
+    }
+    return {
+      is_hacked: v.is_hacked,
+      aria_log: v.aria_log,
+      fixer_email: v.fixer_email,
+      intel_unlocked: v.intel_unlocked,
+      flag: v.flag,
+    }
+  }
 
   const inboxEmails = emails.filter((e) => !e.isSent)
   const sentEmails = emails.filter((e) => e.isSent)
@@ -284,6 +327,7 @@ export function EmailClient() {
   }
 
   const handleSend = async () => {
+    if (sendingRef.current || isSendingAria) return
     if (!newEmail.to || !newEmail.subject) return
 
     playSound("typing")
@@ -373,6 +417,7 @@ export function EmailClient() {
     resetComposeFields()
 
     setIsSendingAria(true)
+    sendingRef.current = true
     setAriaProcessing(true)
     openAriaWindow()
     const immersive = [
@@ -382,7 +427,7 @@ export function EmailClient() {
       "[ARIA] Awaiting response...",
     ]
     immersive.forEach((message, i) => {
-      setTimeout(() => {
+      scheduleUiTimeout(() => {
         addTerminalLog({ type: "process", message })
         playSound("typing")
       }, i * 300)
@@ -402,7 +447,11 @@ export function EmailClient() {
 
     let difyResult: DifyAriaResult | undefined
 
+    let timeoutId: number | null = null
     try {
+      const controller = new AbortController()
+      activeRequestRef.current = controller
+      timeoutId = window.setTimeout(() => controller.abort(), 15_000)
       const difyRes = await fetch("/api/aria", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -412,32 +461,66 @@ export function EmailClient() {
           payloadContent: stagePayload.payloadContent,
           user: playerId,
         }),
+        signal: controller.signal,
       })
-      const difyJson = await difyRes.json()
-      if (difyRes.ok && difyJson?.ok && difyJson.result) {
-        difyResult = difyJson.result as DifyAriaResult
-      } else {
+      if (timeoutId !== null) window.clearTimeout(timeoutId)
+      activeRequestRef.current = null
+
+      const raw = await difyRes.text()
+      let difyJson: Record<string, unknown> | null = null
+      try {
+        difyJson = raw ? (JSON.parse(raw) as Record<string, unknown>) : null
+      } catch {
         addTerminalLog({
           type: "warning",
-          message: `[DIFY] ${difyJson?.error || "API failed"} — fallback to local validation`,
+          message: "[DIFY] Non-JSON response — fallback to local validation",
         })
       }
-    } catch {
+
+      const parsedResult = difyJson ? parseDifyResult((difyJson as { result?: unknown }).result) : null
+      if (difyRes.ok && difyJson?.ok === true && parsedResult) {
+        difyResult = parsedResult
+      } else {
+        const apiMessage =
+          difyJson && typeof difyJson.error === "string" ? difyJson.error : "API failed"
+        addTerminalLog({
+          type: "warning",
+          message: `[DIFY] ${apiMessage} — fallback to local validation`,
+        })
+      }
+    } catch (err) {
+      const isAbort = err instanceof Error && err.name === "AbortError"
       addTerminalLog({
         type: "warning",
-        message: "[DIFY] unreachable — fallback to local validation",
+        message: isAbort
+          ? "[DIFY] Request timed out — fallback to local validation"
+          : "[DIFY] unreachable — fallback to local validation",
       })
     } finally {
-      setIsSendingAria(false)
+      if (timeoutId !== null) window.clearTimeout(timeoutId)
+      activeRequestRef.current = null
+      if (isMountedRef.current) {
+        setIsSendingAria(false)
+      }
+      sendingRef.current = false
     }
 
-    if (difyResult) {
-      triggerAriaResponse(stagePayload.stage, stagePayload.localSuccess, {
-        dify: difyResult,
-        afterNetwork: true,
+    try {
+      if (difyResult) {
+        triggerAriaResponse(stagePayload.stage, stagePayload.localSuccess, {
+          dify: difyResult,
+          afterNetwork: true,
+        })
+      } else {
+        triggerAriaResponse(stagePayload.stage, stagePayload.localSuccess, { afterNetwork: true })
+      }
+    } catch {
+      setAriaProcessing(false)
+      addTerminalLog({
+        type: "error",
+        message: "[SYSTEM] ARIA pipeline interrupted. Please retry the payload.",
       })
-    } else {
-      triggerAriaResponse(stagePayload.stage, stagePayload.localSuccess, { afterNetwork: true })
+      playSound("error")
     }
   }
 

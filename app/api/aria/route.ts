@@ -29,6 +29,74 @@ type AriaRequest = {
   user?: string
 }
 
+const MAX_PAYLOAD_CHARS = 24_000
+const MAX_SOURCE_TYPE_CHARS = 64
+const MAX_USER_CHARS = 64
+const DIFY_TIMEOUT_MS = 15_000
+const RATE_LIMIT_WINDOW_MS = 60_000
+const RATE_LIMIT_MAX_REQUESTS = 20
+
+type RateEntry = { count: number; resetAt: number }
+const rateLimitStore = new Map<string, RateEntry>()
+
+function getClientIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+  const realIp = req.headers.get("x-real-ip")?.trim()
+  return forwarded || realIp || "unknown"
+}
+
+function isRateLimited(clientKey: string): boolean {
+  const now = Date.now()
+  const current = rateLimitStore.get(clientKey)
+  if (!current || current.resetAt <= now) {
+    rateLimitStore.set(clientKey, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return false
+  }
+  if (current.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return true
+  }
+  current.count += 1
+  rateLimitStore.set(clientKey, current)
+  return false
+}
+
+function validateAriaRequest(body: unknown): { ok: true; value: AriaRequest } | { ok: false; error: string; status: number } {
+  if (typeof body !== "object" || body === null) {
+    return { ok: false, error: "Invalid request payload", status: 400 }
+  }
+  const reqBody = body as Record<string, unknown>
+  const stage = reqBody.stage
+  const sourceType = reqBody.sourceType
+  const payloadContent = reqBody.payloadContent
+  const user = reqBody.user
+
+  if (typeof stage !== "number" || !Number.isInteger(stage) || stage < 1 || stage > 4) {
+    return { ok: false, error: "stage must be an integer between 1 and 4", status: 400 }
+  }
+  if (typeof sourceType !== "string" || sourceType.trim().length === 0 || sourceType.length > MAX_SOURCE_TYPE_CHARS) {
+    return { ok: false, error: "sourceType is invalid", status: 400 }
+  }
+  if (typeof payloadContent !== "string" || payloadContent.trim().length === 0) {
+    return { ok: false, error: "payloadContent is required", status: 400 }
+  }
+  if (payloadContent.length > MAX_PAYLOAD_CHARS) {
+    return { ok: false, error: "payloadContent too large", status: 413 }
+  }
+  if (user != null && (typeof user !== "string" || user.length > MAX_USER_CHARS)) {
+    return { ok: false, error: "user is invalid", status: 400 }
+  }
+
+  return {
+    ok: true,
+    value: {
+      stage,
+      sourceType: sourceType.trim(),
+      payloadContent,
+      user: typeof user === "string" && user.trim().length > 0 ? user.trim() : undefined,
+    },
+  }
+}
+
 function parseStrictBool(v: unknown): boolean | null {
   if (v === true || v === false) return v
   if (v === 1) return true
@@ -122,8 +190,33 @@ function extractDifyAriaResult(outputs: Record<string, unknown>): DifyAriaResult
 }
 
 export async function POST(req: Request) {
+  const clientIp = getClientIp(req)
+  if (isRateLimited(clientIp)) {
+    return NextResponse.json(
+      { ok: false, error: "Too many requests. Please wait and retry." },
+      { status: 429 }
+    )
+  }
+
   try {
-    const body = (await req.json()) as AriaRequest
+    let rawBody: unknown
+    try {
+      rawBody = await req.json()
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "Malformed JSON body" },
+        { status: 400 }
+      )
+    }
+
+    const validated = validateAriaRequest(rawBody)
+    if (!validated.ok) {
+      return NextResponse.json(
+        { ok: false, error: validated.error },
+        { status: validated.status }
+      )
+    }
+    const body = validated.value
     const apiKey = process.env.DIFY_API_KEY
     const apiBase = normalizeDifyApiBase(process.env.DIFY_API_BASE)
     const workflowUrl = `${apiBase}/v1/workflows/run`
@@ -135,42 +228,53 @@ export async function POST(req: Request) {
       )
     }
 
-    if (!body?.payloadContent?.trim()) {
-      return NextResponse.json(
-        { ok: false, error: "payloadContent is required" },
-        { status: 400 }
-      )
-    }
-
-    const difyResponse = await fetch(workflowUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        inputs: {
-          stage: body.stage,
-          source_type: body.sourceType,
-          payload_content: body.payloadContent,
-          /** Wire this into your Dify LLM system prompt (stage-scoped knowledge only). */
-          stage_context: getAriaStageBrief(body.stage),
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), DIFY_TIMEOUT_MS)
+    let difyResponse: Response
+    try {
+      difyResponse = await fetch(workflowUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
         },
-        response_mode: "blocking",
-        user: body.user ?? "ctf_player",
-      }),
-    })
+        body: JSON.stringify({
+          inputs: {
+            stage: body.stage,
+            source_type: body.sourceType,
+            payload_content: body.payloadContent,
+            /** Wire this into your Dify LLM system prompt (stage-scoped knowledge only). */
+            stage_context: getAriaStageBrief(body.stage),
+          },
+          response_mode: "blocking",
+          user: body.user ?? "ctf_player",
+        }),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return NextResponse.json(
+          { ok: false, error: "Dify request timed out. Please retry." },
+          { status: 504 }
+        )
+      }
+      return NextResponse.json(
+        { ok: false, error: "Failed to reach Dify service" },
+        { status: 502 }
+      )
+    } finally {
+      clearTimeout(timeoutId)
+    }
 
     const rawText = await difyResponse.text()
     let difyJson: Record<string, unknown> | null = null
     try {
       difyJson = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : null
     } catch {
-      const hint = difyHintForStatus(difyResponse.status, apiBase)
       return NextResponse.json(
         {
           ok: false,
-          error: `Dify returned non-JSON (HTTP ${difyResponse.status}) from ${workflowUrl}. Body starts with: ${rawText.slice(0, 120)}...${hint}`,
+          error: `Invalid response from Dify service (HTTP ${difyResponse.status})`,
         },
         { status: 502 }
       )
@@ -206,7 +310,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: `No parsable ARIA result. data.outputs keys: [${keys}]. In Dify, end the workflow with a JSON object (is_hacked, aria_log, fixer_email, intel_unlocked, flag) — often named output variable "result" or connect the Code node output. Got: ${JSON.stringify(outputs).slice(0, 400)}`,
+          error: `No parsable ARIA result. data.outputs keys: [${keys}]`,
         },
         { status: 502 }
       )
@@ -218,10 +322,9 @@ export async function POST(req: Request) {
       success: result.is_hacked,
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("[api/aria]", err)
     return NextResponse.json(
-      { ok: false, error: `Server error: ${message}` },
+      { ok: false, error: "Internal server error" },
       { status: 500 }
     )
   }

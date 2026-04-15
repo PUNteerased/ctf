@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { DesktopIcon } from "@/components/desktop-icon"
 import { Taskbar } from "@/components/taskbar"
 import { Window } from "@/components/window"
@@ -9,6 +9,7 @@ import { EmailClient } from "@/components/apps/email-client"
 import { FileExplorer } from "@/components/apps/file-explorer"
 import { Browser } from "@/components/apps/browser"
 import { AriaTerminal } from "@/components/apps/aria-terminal"
+import { AppErrorBoundary } from "@/components/app-error-boundary"
 import { Toaster } from "sonner"
 import { GameProvider, useGame } from "@/lib/game-context"
 import { Mail, Folder, Globe, Terminal, Volume2, VolumeX } from "lucide-react"
@@ -38,84 +39,78 @@ function DesktopContent() {
   } = useGame()
 
   const [windows, setWindows] = useState<WindowState[]>([])
-  const [maxZIndex, setMaxZIndex] = useState(1)
+  const maxZIndexRef = useRef(1)
+
+  const nextZIndex = useCallback(() => {
+    maxZIndexRef.current += 1
+    return maxZIndexRef.current
+  }, [])
 
   // Timer effect - only runs when timerRunning is true
   useEffect(() => {
     if (!timerRunning) return
-    if (timeRemaining <= 0) {
-      expireMission()
-      return
-    }
-
-    const interval = setInterval(() => {
-      const next = Math.max(0, timeRemaining - 1)
-      setTimeRemaining(next)
-
-      // Warning sound at 30 seconds
-      if (next === 30) {
-        playSound("warning")
-      }
+    const interval = window.setInterval(() => {
+      setTimeRemaining((prev) => {
+        const next = Math.max(0, prev - 1)
+        if (next === 30) playSound("warning")
+        return next
+      })
     }, 1000)
-    
-    return () => clearInterval(interval)
-  }, [timeRemaining, setTimeRemaining, playSound, timerRunning, expireMission])
+    return () => window.clearInterval(interval)
+  }, [timerRunning, setTimeRemaining, playSound])
+
+  useEffect(() => {
+    if (timerRunning && timeRemaining <= 0) {
+      expireMission()
+    }
+  }, [timerRunning, timeRemaining, expireMission])
 
   // Auto-open ARIA window when triggered
   useEffect(() => {
-    if (ariaWindowOpen && !windows.find((w) => w.id === "aria")) {
-      setWindows((prev) => [
-        ...prev,
-        { id: "aria", isMinimized: false, zIndex: maxZIndex + 1 },
-      ])
-      setMaxZIndex((prev) => prev + 1)
-    }
-  }, [ariaWindowOpen, windows, maxZIndex])
+    if (!ariaWindowOpen) return
+    setWindows((prev) => {
+      if (prev.some((w) => w.id === "aria")) return prev
+      return [...prev, { id: "aria", isMinimized: false, zIndex: nextZIndex() }]
+    })
+  }, [ariaWindowOpen, nextZIndex])
 
   const openApp = (appId: AppType) => {
-    const existingWindow = windows.find((w) => w.id === appId)
-    if (existingWindow) {
-      setWindows(
-        windows.map((w) =>
-          w.id === appId
-            ? { ...w, isMinimized: false, zIndex: maxZIndex + 1 }
-            : w
+    setWindows((prev) => {
+      const zIndex = nextZIndex()
+      const existingWindow = prev.find((w) => w.id === appId)
+      if (existingWindow) {
+        return prev.map((w) =>
+          w.id === appId ? { ...w, isMinimized: false, zIndex } : w
         )
-      )
-      setMaxZIndex((prev) => prev + 1)
-    } else {
-      setWindows([
-        ...windows,
-        { id: appId, isMinimized: false, zIndex: maxZIndex + 1 },
-      ])
-      setMaxZIndex((prev) => prev + 1)
-    }
-    
+      }
+      return [...prev, { id: appId, isMinimized: false, zIndex }]
+    })
+
     if (appId === "aria") {
       setAriaWindowOpen(true)
     }
   }
 
   const closeApp = (appId: AppType) => {
-    setWindows(windows.filter((w) => w.id !== appId))
+    setWindows((prev) => prev.filter((w) => w.id !== appId))
     if (appId === "aria") {
       setAriaWindowOpen(false)
     }
   }
 
   const minimizeApp = (appId: AppType) => {
-    setWindows(
-      windows.map((w) => (w.id === appId ? { ...w, isMinimized: true } : w))
+    setWindows((prev) =>
+      prev.map((w) => (w.id === appId ? { ...w, isMinimized: true } : w))
     )
   }
 
   const focusWindow = (appId: AppType) => {
-    setWindows(
-      windows.map((w) =>
-        w.id === appId ? { ...w, zIndex: maxZIndex + 1 } : w
+    setWindows((prev) => {
+      const zIndex = nextZIndex()
+      return prev.map((w) =>
+        w.id === appId ? { ...w, zIndex } : w
       )
-    )
-    setMaxZIndex((prev) => prev + 1)
+    })
   }
 
   const apps = [
@@ -128,13 +123,21 @@ function DesktopContent() {
   const getAppContent = (appId: AppType) => {
     switch (appId) {
       case "email":
-        return <EmailClient />
+        return (
+          <AppErrorBoundary appName="Email Client">
+            <EmailClient />
+          </AppErrorBoundary>
+        )
       case "files":
         return <FileExplorer />
       case "browser":
         return <Browser />
       case "aria":
-        return <AriaTerminal />
+        return (
+          <AppErrorBoundary appName="ARIA Terminal">
+            <AriaTerminal />
+          </AppErrorBoundary>
+        )
       default:
         return null
     }

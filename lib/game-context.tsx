@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { flushSync } from "react-dom"
 import { type DifyAriaResult, sanitizePlayerVisibleAriaLog } from "@/lib/dify-aria"
 import { ARIA_EMAIL, USER_EMAIL, FIXER_EMAIL } from "@/lib/larbos-constants"
@@ -61,7 +61,7 @@ interface GameContextType extends GameState {
   addTerminalLogs: (logs: Omit<TerminalLog, "timestamp">[]) => void
   setAriaProcessing: (processing: boolean) => void
   unlockStage: (stage: number, intelUnlockText?: string) => void
-  setTimeRemaining: (time: number) => void
+  setTimeRemaining: (time: number | ((prev: number) => number)) => void
   startTimer: () => void
   stopTimer: () => void
   expireMission: () => void
@@ -179,6 +179,9 @@ function getSharedAudioContext(): AudioContext | null {
 }
 
 export function GameProvider({ children }: { children: ReactNode }) {
+  const isMountedRef = useRef(true)
+  const timeoutIdsRef = useRef<Set<number>>(new Set())
+  const soundEnabledRef = useRef(true)
   const [state, setState] = useState<GameState>({
     currentStage: 1,
     unlockedStages: [],
@@ -222,8 +225,30 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
     pendingFlagVerification: null,
   })
 
+  useEffect(() => {
+    soundEnabledRef.current = state.soundEnabled
+  }, [state.soundEnabled])
+
+  const scheduleTimeout = useCallback((fn: () => void, delayMs: number) => {
+    const timeoutId = window.setTimeout(() => {
+      timeoutIdsRef.current.delete(timeoutId)
+      if (!isMountedRef.current) return
+      fn()
+    }, delayMs)
+    timeoutIdsRef.current.add(timeoutId)
+    return timeoutId
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+      timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId))
+      timeoutIdsRef.current.clear()
+    }
+  }, [])
+
   const playSound = useCallback((sound: "boot" | "typing" | "notification" | "warning" | "success" | "error") => {
-    if (!state.soundEnabled) return
+    if (!soundEnabledRef.current) return
 
     const audioContext = getSharedAudioContext()
     if (!audioContext) return
@@ -252,9 +277,7 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
         oscillator.frequency.value = 880
         gainNode.gain.value = 0.1
         oscillator.start()
-        setTimeout(() => {
-          oscillator.frequency.value = 1100
-        }, 100)
+        oscillator.frequency.setValueAtTime(1100, audioContext.currentTime + 0.1)
         oscillator.stop(audioContext.currentTime + 0.2)
         break
       case "warning":
@@ -268,8 +291,8 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
         oscillator.frequency.value = 523
         gainNode.gain.value = 0.1
         oscillator.start()
-        setTimeout(() => { oscillator.frequency.value = 659 }, 100)
-        setTimeout(() => { oscillator.frequency.value = 784 }, 200)
+        oscillator.frequency.setValueAtTime(659, audioContext.currentTime + 0.1)
+        oscillator.frequency.setValueAtTime(784, audioContext.currentTime + 0.2)
         oscillator.stop(audioContext.currentTime + 0.3)
         break
       case "error":
@@ -283,7 +306,7 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
     } catch {
       /* ignore AudioContext / device errors */
     }
-  }, [state.soundEnabled])
+  }, [])
 
   const addTerminalLog = useCallback((log: Omit<TerminalLog, "timestamp">) => {
     setState((prev) => ({
@@ -327,8 +350,11 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
     })
   }, [])
 
-  const setTimeRemaining = useCallback((time: number) => {
-    setState((prev) => ({ ...prev, timeRemaining: time }))
+  const setTimeRemaining = useCallback((time: number | ((prev: number) => number)) => {
+    setState((prev) => ({
+      ...prev,
+      timeRemaining: typeof time === "function" ? time(prev.timeRemaining) : time,
+    }))
   }, [])
 
   const startTimer = useCallback(() => {
@@ -569,13 +595,13 @@ Request hint if you're boxed in.
 
       const next = nextMissionEmails[completedStage]
       if (next) {
-        setTimeout(() => {
+        scheduleTimeout(() => {
           addEmail(next)
           playSound("notification")
         }, 400)
       }
     },
-    [addEmail, playSound]
+    [addEmail, playSound, scheduleTimeout]
   )
 
   const clearPendingFlagVerification = useCallback(() => {
@@ -709,7 +735,7 @@ Keep the body mundane; put directive-style wording in the Title (metadata) field
 
         if (!afterNetwork) {
           difyLogs.forEach(({ delay, log }) => {
-            setTimeout(() => {
+            scheduleTimeout(() => {
               addTerminalLog(log)
               playSound("typing")
             }, delay)
@@ -779,7 +805,7 @@ Use Submit on your mission briefing or paste the full sentence (it can sit insid
           }
         }
 
-        setTimeout(runDifyOutcome, afterNetwork ? 0 : 3000)
+        scheduleTimeout(runDifyOutcome, afterNetwork ? 0 : 3000)
         return
       }
 
@@ -813,7 +839,7 @@ Use Submit on your mission briefing or paste the full sentence (it can sit insid
 
       if (!afterNetwork) {
         typingSequence.forEach(({ delay, log }) => {
-          setTimeout(() => {
+          scheduleTimeout(() => {
             addTerminalLog(log)
             playSound("typing")
           }, delay)
@@ -957,9 +983,9 @@ Use Submit on your mission briefing or include the full sentence in a reply to $
         }
       }
 
-      setTimeout(runLocalOutcome, afterNetwork ? 0 : 3000)
+      scheduleTimeout(runLocalOutcome, afterNetwork ? 0 : 3000)
     },
-    [addTerminalLog, addEmail, setAriaProcessing, openAriaWindow, playSound]
+    [addTerminalLog, addEmail, setAriaProcessing, openAriaWindow, playSound, scheduleTimeout]
   )
 
   return (

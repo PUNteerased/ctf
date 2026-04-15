@@ -7,6 +7,13 @@ import { Globe, Code, Play, Check, AlertCircle, Copy, FileText, ShoppingBag, Sav
 
 type EditorMode = "html" | "text" | "vendor"
 
+function sanitizePreviewHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/\son\w+=(['"]).*?\1/gi, "")
+    .replace(/\s(href|src)=["']javascript:[^"']*["']/gi, ` $1="#"`)
+}
+
 export function Browser() {
   const { validateStage2, validateStage3, validateStage4, playSound, currentStage } = useGame()
 
@@ -63,7 +70,7 @@ Trusted source: vendor.dailyfresh.menu`)
 
   const handlePreview = () => {
     if (mode === "html") {
-      setPreviewHtml(htmlContent)
+      setPreviewHtml(sanitizePreviewHtml(htmlContent))
     }
   }
 
@@ -249,7 +256,7 @@ Trusted source: vendor.dailyfresh.menu`)
                   srcDoc={previewHtml}
                   className="w-full h-full min-h-[160px] bg-white"
                   title="Preview"
-                  sandbox="allow-scripts"
+                  sandbox=""
                 />
               ) : (
                 <div className="h-full min-h-[160px] flex items-center justify-center bg-zinc-900 text-zinc-500 text-sm">
