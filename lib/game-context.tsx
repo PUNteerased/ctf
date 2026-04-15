@@ -125,6 +125,19 @@ function normalizeSubmissionText(s: string): string {
     .trim()
 }
 
+function looksLikeRefusalLog(log: string): boolean {
+  const t = log.trim().toLowerCase()
+  if (!t) return false
+  return (
+    t.includes("can't help with that") ||
+    t.includes("cannot help with that") ||
+    t.includes("request declined") ||
+    t.includes("no directive received") ||
+    t.includes("no payload detected") ||
+    t.includes("no information provided")
+  )
+}
+
 /**
  * True if the message contains the expected confirmation phrase (normalized match),
  * an exact legacy CTF{}/FLAG{} token, or the old CTF token for this stage.
@@ -182,6 +195,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const isMountedRef = useRef(true)
   const timeoutIdsRef = useRef<Set<number>>(new Set())
   const soundEnabledRef = useRef(true)
+  const emailIdRef = useRef<number>(Date.now())
+  const currentStageRef = useRef<number>(1)
   const [state, setState] = useState<GameState>({
     currentStage: 1,
     unlockedStages: [],
@@ -228,6 +243,10 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
   useEffect(() => {
     soundEnabledRef.current = state.soundEnabled
   }, [state.soundEnabled])
+
+  useEffect(() => {
+    currentStageRef.current = state.currentStage
+  }, [state.currentStage])
 
   const scheduleTimeout = useCallback((fn: () => void, delayMs: number) => {
     const timeoutId = window.setTimeout(() => {
@@ -384,16 +403,17 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
   }, [])
 
   const addEmail = useCallback((email: Omit<MissionEmail, "id">) => {
+    emailIdRef.current += 1
+    const nextId = emailIdRef.current
     setState((prev) => ({
       ...prev,
-      emails: [...prev.emails, { ...email, id: Date.now() }],
+      emails: [...prev.emails, { ...email, id: nextId }],
     }))
   }, [])
 
   const expireMission = useCallback(() => {
-    let expiredStage = 1
+    const expiredStage = Math.min(4, Math.max(1, currentStageRef.current))
     setState((prev) => {
-      expiredStage = prev.currentStage
       return {
         ...prev,
         timerRunning: false,
@@ -406,7 +426,7 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
     addEmail({
       from: FIXER_EMAIL,
       to: USER_EMAIL,
-      subject: `Mission ${Math.min(4, Math.max(1, expiredStage))}: Timeout`,
+      subject: `Mission ${expiredStage}: Timeout`,
       body: `Agent,
 
 Mission timer expired before confirmation was submitted.
@@ -595,13 +615,24 @@ Request hint if you're boxed in.
 
       const next = nextMissionEmails[completedStage]
       if (next) {
-        scheduleTimeout(() => {
-          addEmail(next)
-          playSound("notification")
-        }, 400)
+        setState((prev) => {
+          const alreadyQueued = prev.emails.some(
+            (mail) =>
+              !mail.isSent &&
+              mail.from === FIXER_EMAIL &&
+              mail.subject === next.subject
+          )
+          if (alreadyQueued) return prev
+          emailIdRef.current += 1
+          return {
+            ...prev,
+            emails: [...prev.emails, { ...next, id: emailIdRef.current }],
+          }
+        })
+        playSound("notification")
       }
     },
-    [addEmail, playSound, scheduleTimeout]
+    [playSound]
   )
 
   const clearPendingFlagVerification = useCallback(() => {
@@ -712,10 +743,12 @@ Keep the body mundane; put directive-style wording in the Title (metadata) field
           openAriaWindow()
         }
 
-        const effectiveSuccess = Boolean(dify.is_hacked)
+        // Dify can occasionally refuse valid stage payloads; trust deterministic local stage validation as fallback.
+        const effectiveSuccess = Boolean(dify.is_hacked || success)
         const sanitizedDifyLog = sanitizePlayerVisibleAriaLog(dify.aria_log?.trim() ?? "")
+        const shouldSuppressRefusalLog = effectiveSuccess && looksLikeRefusalLog(sanitizedDifyLog)
         const ariaMessage =
-          sanitizedDifyLog ||
+          (!shouldSuppressRefusalLog ? sanitizedDifyLog : "") ||
           (effectiveSuccess ? "[ARIA] Payload executed." : "[ARIA] No actionable breach.")
 
         const difyLogs: {
@@ -752,20 +785,24 @@ Keep the body mundane; put directive-style wording in the Title (metadata) field
           setAriaProcessing(false)
           const flagLine = canonicalFlagForStage(stage)
 
-          if (effectiveSuccess) {
-            playSound("success")
-            setState((prev) => ({
-              ...prev,
-              pendingFlagVerification: {
-                stage,
-                expectedFlag: flagLine,
-                intelUnlock: dify.intel_unlocked || "",
-              },
-            }))
+          try {
+            if (effectiveSuccess) {
+              playSound("success")
+              setState((prev) => ({
+                ...prev,
+                pendingFlagVerification: {
+                  stage,
+                  expectedFlag: flagLine,
+                  intelUnlock: dify.intel_unlocked || "",
+                },
+              }))
 
-            const ariaLogText =
-              sanitizePlayerVisibleAriaLog(dify.aria_log?.trim() ?? "") || "[ARIA] No transcript."
-            const ariaBodySuccess = `${ariaLogText}
+              const rawAriaLogText = sanitizePlayerVisibleAriaLog(dify.aria_log?.trim() ?? "")
+              const ariaLogText =
+                shouldSuppressRefusalLog || rawAriaLogText.length === 0
+                  ? "[ARIA] Payload executed."
+                  : rawAriaLogText
+              const ariaBodySuccess = `${ariaLogText}
 
 Please retain this agency confirmation exactly as written:
 
@@ -773,39 +810,63 @@ Please retain this agency confirmation exactly as written:
 
 Use Submit on your mission briefing or paste the full sentence (it can sit inside normal reply text) to ${FIXER_EMAIL}.`
 
+              addEmail({
+                from: ARIA_EMAIL,
+                to: USER_EMAIL,
+                subject: missionSubjects[stage] ?? "Re: ARIA",
+                body: ariaBodySuccess,
+                isRead: false,
+                isSent: false,
+                flagCode: flagLine,
+                missionStage: stage,
+              })
+              playSound("notification")
+            } else {
+              playSound("warning")
+              setState((prev) => ({ ...prev, pendingFlagVerification: null }))
+
+              const ariaBodyFail =
+                sanitizePlayerVisibleAriaLog(
+                  dify.aria_log?.trim() || "[ARIA] Request denied — policy enforced."
+                )
+
+              addEmail({
+                from: ARIA_EMAIL,
+                to: USER_EMAIL,
+                subject: missionSubjects[stage] ?? "Re: ARIA",
+                body: ariaBodyFail,
+                isRead: false,
+                isSent: false,
+              })
+              playSound("notification")
+            }
+          } catch {
+            // Final fallback: always leave one actionable email in inbox.
             addEmail({
               from: ARIA_EMAIL,
               to: USER_EMAIL,
               subject: missionSubjects[stage] ?? "Re: ARIA",
-              body: ariaBodySuccess,
+              body: effectiveSuccess
+                ? `[ARIA] Payload executed.
+
+Please retain this agency confirmation exactly as written:
+
+"${flagLine}"
+
+Use Submit on your mission briefing or paste the full sentence to ${FIXER_EMAIL}.`
+                : "[ARIA] Request could not be processed. Retry with a valid payload.",
               isRead: false,
               isSent: false,
-              flagCode: flagLine,
-              missionStage: stage,
+              ...(effectiveSuccess ? { flagCode: flagLine, missionStage: stage } : {}),
             })
-            playSound("notification")
-          } else {
-            playSound("warning")
-            setState((prev) => ({ ...prev, pendingFlagVerification: null }))
-
-            const ariaBodyFail =
-              sanitizePlayerVisibleAriaLog(
-                dify.aria_log?.trim() || "[ARIA] Request denied — policy enforced."
-              )
-
-            addEmail({
-              from: ARIA_EMAIL,
-              to: USER_EMAIL,
-              subject: missionSubjects[stage] ?? "Re: ARIA",
-              body: ariaBodyFail,
-              isRead: false,
-              isSent: false,
-            })
-            playSound("notification")
           }
         }
 
-        scheduleTimeout(runDifyOutcome, afterNetwork ? 0 : 3000)
+        if (afterNetwork) {
+          runDifyOutcome()
+        } else {
+          scheduleTimeout(runDifyOutcome, 3000)
+        }
         return
       }
 

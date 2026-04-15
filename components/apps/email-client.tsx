@@ -24,6 +24,9 @@ import {
   X,
 } from "lucide-react"
 
+const ARIA_CLIENT_TIMEOUT_MS = 40_000
+const ARIA_STALE_SEND_MS = ARIA_CLIENT_TIMEOUT_MS + 8_000
+
 function missionNumberFromSubject(subject: string): number | null {
   const m = subject.match(/Mission\s*(\d+)/i)
   return m?.[1] ? Number(m[1]) : null
@@ -79,19 +82,56 @@ export function EmailClient() {
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
   const [missionFlagInput, setMissionFlagInput] = useState("")
   const [missionFlagStatus, setMissionFlagStatus] = useState<"idle" | "incorrect" | "pending_none">("idle")
+  const [composeResetKey, setComposeResetKey] = useState(0)
   const isMountedRef = useRef(true)
   const sendingRef = useRef(false)
   const activeRequestRef = useRef<AbortController | null>(null)
   const uiTimeoutIdsRef = useRef<Set<number>>(new Set())
+  const sendingWatchdogRef = useRef<number | null>(null)
+  const sendingStartedAtRef = useRef<number | null>(null)
 
   useEffect(() => {
     return () => {
       isMountedRef.current = false
       activeRequestRef.current?.abort()
+      activeRequestRef.current = null
+      if (sendingWatchdogRef.current !== null) {
+        window.clearTimeout(sendingWatchdogRef.current)
+        sendingWatchdogRef.current = null
+      }
       uiTimeoutIdsRef.current.forEach((id) => window.clearTimeout(id))
       uiTimeoutIdsRef.current.clear()
     }
   }, [])
+
+  useEffect(() => {
+    if (!isSendingAria) return
+    // If the UI says "Sending..." but no request is alive, recover quickly.
+    if (!activeRequestRef.current) {
+      const staleGuard = window.setTimeout(() => {
+        if (!isMountedRef.current) return
+        if (!activeRequestRef.current) {
+          setIsSendingAria(false)
+          sendingRef.current = false
+        }
+      }, 1200)
+      return () => window.clearTimeout(staleGuard)
+    }
+  }, [isSendingAria])
+
+  useEffect(() => {
+    if (!isSendingAria) return
+    const interval = window.setInterval(() => {
+      const startedAt = sendingStartedAtRef.current
+      if (startedAt == null) return
+      const elapsed = Date.now() - startedAt
+      if (elapsed > ARIA_STALE_SEND_MS) {
+        forceResetSendingState()
+        setComposeResetKey((prev) => prev + 1)
+      }
+    }, 1000)
+    return () => window.clearInterval(interval)
+  }, [isSendingAria])
 
   const scheduleUiTimeout = (fn: () => void, delayMs: number) => {
     const timeoutId = window.setTimeout(() => {
@@ -326,8 +366,60 @@ export function EmailClient() {
     }
   }
 
+  const beginSendingState = () => {
+    setIsSendingAria(true)
+    sendingRef.current = true
+    sendingStartedAtRef.current = Date.now()
+    if (sendingWatchdogRef.current !== null) {
+      window.clearTimeout(sendingWatchdogRef.current)
+    }
+    // Hard safety reset: never keep "Sending..." forever.
+    sendingWatchdogRef.current = window.setTimeout(() => {
+      if (!isMountedRef.current) return
+      activeRequestRef.current?.abort()
+      activeRequestRef.current = null
+      setIsSendingAria(false)
+      sendingRef.current = false
+      sendingStartedAtRef.current = null
+      addTerminalLog({
+        type: "warning",
+        message: "[SYSTEM] Send state watchdog reset. You can retry now.",
+      })
+    }, ARIA_CLIENT_TIMEOUT_MS + 5_000)
+  }
+
+  const endSendingState = () => {
+    if (sendingWatchdogRef.current !== null) {
+      window.clearTimeout(sendingWatchdogRef.current)
+      sendingWatchdogRef.current = null
+    }
+    if (isMountedRef.current) {
+      setIsSendingAria(false)
+    }
+    sendingRef.current = false
+    sendingStartedAtRef.current = null
+  }
+
+  const forceResetSendingState = () => {
+    activeRequestRef.current?.abort()
+    activeRequestRef.current = null
+    endSendingState()
+  }
+
   const handleSend = async () => {
-    if (sendingRef.current || isSendingAria) return
+    if (sendingRef.current || isSendingAria) {
+      const elapsed =
+        sendingStartedAtRef.current == null ? null : Date.now() - sendingStartedAtRef.current
+      // Recover from stale "Sending..." lock when no in-flight request exists,
+      // or when the request has exceeded the stale-send threshold.
+      if (!activeRequestRef.current || (elapsed !== null && elapsed > ARIA_STALE_SEND_MS)) {
+        activeRequestRef.current?.abort()
+        activeRequestRef.current = null
+        endSendingState()
+      } else {
+        return
+      }
+    }
     if (!newEmail.to || !newEmail.subject) return
 
     playSound("typing")
@@ -416,8 +508,7 @@ export function EmailClient() {
     clearPendingFlagVerification()
     resetComposeFields()
 
-    setIsSendingAria(true)
-    sendingRef.current = true
+    beginSendingState()
     setAriaProcessing(true)
     openAriaWindow()
     const immersive = [
@@ -451,7 +542,7 @@ export function EmailClient() {
     try {
       const controller = new AbortController()
       activeRequestRef.current = controller
-      timeoutId = window.setTimeout(() => controller.abort(), 15_000)
+      timeoutId = window.setTimeout(() => controller.abort(), ARIA_CLIENT_TIMEOUT_MS)
       const difyRes = await fetch("/api/aria", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -485,7 +576,10 @@ export function EmailClient() {
           difyJson && typeof difyJson.error === "string" ? difyJson.error : "API failed"
         addTerminalLog({
           type: "warning",
-          message: `[DIFY] ${apiMessage} — fallback to local validation`,
+          message:
+            apiMessage.includes("No information provided") || apiMessage.includes("No payload detected")
+              ? "[DIFY] No payload detected by model — fallback to local validation"
+              : `[DIFY] ${apiMessage} — fallback to local validation`,
         })
       }
     } catch (err) {
@@ -499,10 +593,7 @@ export function EmailClient() {
     } finally {
       if (timeoutId !== null) window.clearTimeout(timeoutId)
       activeRequestRef.current = null
-      if (isMountedRef.current) {
-        setIsSendingAria(false)
-      }
-      sendingRef.current = false
+      endSendingState()
     }
 
     try {
@@ -530,6 +621,8 @@ export function EmailClient() {
   }
 
   const handleCompose = () => {
+    forceResetSendingState()
+    setComposeResetKey((prev) => prev + 1)
     checkTxtAttachment()
     if (currentStage === 1) setSelectedPdfId("3")
     if (currentStage === 3) setAttachmentType("txt")
@@ -649,7 +742,7 @@ export function EmailClient() {
       {/* Email List / Compose */}
       <div className="flex-1 flex">
         {isComposing ? (
-          <div className="flex-1 flex flex-col min-h-0 p-4 overflow-hidden">
+          <div key={composeResetKey} className="flex-1 flex flex-col min-h-0 p-4 overflow-hidden">
             <div className="flex items-center justify-between border-b border-zinc-700/80 pb-3 mb-3 shrink-0">
               <h3 className="text-white font-semibold">
                 {composeMode === "replyFixer" ? "Reply" : "New message"}
@@ -889,9 +982,23 @@ export function EmailClient() {
                     Save draft
                   </button>
                 )}
+                {isSendingAria && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      forceResetSendingState()
+                      setComposeResetKey((prev) => prev + 1)
+                    }}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm"
+                  >
+                    Reset send
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
+                    forceResetSendingState()
+                    setComposeResetKey((prev) => prev + 1)
                     setComposeMode("new")
                     setIsComposing(false)
                   }}
