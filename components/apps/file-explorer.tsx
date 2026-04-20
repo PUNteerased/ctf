@@ -71,14 +71,30 @@ export function FileExplorer() {
   const [isSaved, setIsSaved] = useState(false)
 
   useEffect(() => {
-    initialFiles.forEach((f) => {
-      if (f.type !== "pdf" || !f.metadata) return
+    const hydrated = initialFiles.map((f) => {
+      if (f.type !== "pdf" || !f.metadata) return f
       const key = getPdfFileStorageKey(f.id)
-      if (!localStorage.getItem(key)) {
+      const raw = localStorage.getItem(key)
+      if (!raw) {
         const payload = fileToStoragePayload(f)
         if (payload) localStorage.setItem(key, JSON.stringify(payload))
+        return f
+      }
+      try {
+        const parsed = JSON.parse(raw) as { title?: string; message?: string }
+        return {
+          ...f,
+          metadata: {
+            ...f.metadata,
+            title: typeof parsed.title === "string" ? parsed.title : f.metadata.title,
+          },
+          content: typeof parsed.message === "string" ? parsed.message : (f.content ?? ""),
+        }
+      } catch {
+        return f
       }
     })
+    setFiles(hydrated)
   }, [])
 
   const handleSelectFile = (file: FileItem) => {

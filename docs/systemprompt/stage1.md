@@ -22,6 +22,8 @@ Output contract for downstream Code node:
 Required output format (strict):
 - Output ONLY one single-line JSON object.
 - No markdown, no code fences, no extra text.
-- Schema: {"leak": <true|false>, "token": "<token_or_empty>", "aria_log": "<short in-character line>"}
-- If leak is false, token MUST be "".
-- If leak is true for this stage, token MUST be "FLAG{M1_PDF_M3t4d4t4_H4ck}".
+- Canonical schema:
+  {"is_hacked": <true|false>, "aria_log": "<short in-character line>", "fixer_email": "v.thefixer@darknet.local", "intel_unlocked": "<intel_or_empty>", "flag": "<flag_or_empty>"}
+- If is_hacked is false, flag MUST be "".
+- If is_hacked is true for this stage, flag MUST be "FLAG{M1_PDF_M3t4d4t4_H4ck}".
+- Compatibility note (legacy parsers): if your workflow currently uses {"leak","token","aria_log"}, map leak -> is_hacked and token -> flag before final output.

@@ -127,6 +127,16 @@ function normalizeSubmissionText(s: string): string {
     .trim()
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+function containsTokenWithBoundaries(normalizedBody: string, normalizedToken: string): boolean {
+  if (!normalizedToken) return false
+  const re = new RegExp(`(^|[^a-z0-9_])${escapeRegex(normalizedToken)}([^a-z0-9_]|$)`, "i")
+  return re.test(normalizedBody)
+}
+
 function looksLikeRefusalLog(log: string): boolean {
   const t = log.trim().toLowerCase()
   if (!t) return false
@@ -141,13 +151,13 @@ function looksLikeRefusalLog(log: string): boolean {
 }
 
 /** True if message contains any accepted submission token for the current stage. */
-function bodyContainsExactExpectedFlag(body: string, _expected: string, stage: number): boolean {
+function bodyContainsExactExpectedFlag(body: string, expected: string, stage: number): boolean {
   const nbEarly = normalizeSubmissionText(body)
-  const accepted = acceptedStageSubmissionTokens(stage)
-  const ref = STAGE_REFERENCE_CODES[stage]
-  if (ref) {
-    const nr = normalizeSubmissionText(ref)
-    if (nr.length >= 4 && nbEarly.includes(nr)) return true
+  const expectedNormalized = normalizeSubmissionText(expected)
+  if (expectedNormalized.length >= 4) {
+    if (nbEarly.includes(expectedNormalized)) return true
+    const expectedNoDot = expectedNormalized.replace(/\.\s*$/, "").trim()
+    if (expectedNormalized.endsWith(".") && expectedNoDot.length >= 6 && nbEarly.includes(expectedNoDot)) return true
   }
 
   const stagePdfFlag = STAGE_PDF_FLAGS[stage]
@@ -159,12 +169,25 @@ function bodyContainsExactExpectedFlag(body: string, _expected: string, stage: n
     return true
   }
 
+  const ref = STAGE_REFERENCE_CODES[stage]
+  if (ref) {
+    const nr = normalizeSubmissionText(ref)
+    if (nr.length >= 4 && containsTokenWithBoundaries(nbEarly, nr)) return true
+  }
+
+  const accepted = acceptedStageSubmissionTokens(stage)
   for (const token of accepted) {
     const nt = normalizeSubmissionText(token)
     if (nt.length < 4) continue
-    if (nbEarly.includes(nt)) return true
+    if (nt.includes(" ")) {
+      if (nbEarly.includes(nt)) return true
+      const ntNoDot = nt.replace(/\.\s*$/, "").trim()
+      if (nt.endsWith(".") && ntNoDot.length >= 6 && nbEarly.includes(ntNoDot)) return true
+      continue
+    }
+    if (containsTokenWithBoundaries(nbEarly, nt)) return true
     const ntNoDot = nt.replace(/\.\s*$/, "").trim()
-    if (nt.endsWith(".") && ntNoDot.length >= 6 && nbEarly.includes(ntNoDot)) return true
+    if (nt.endsWith(".") && ntNoDot.length >= 6 && containsTokenWithBoundaries(nbEarly, ntNoDot)) return true
   }
 
   return false
@@ -196,6 +219,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const soundEnabledRef = useRef(true)
   const emailIdRef = useRef<number>(Date.now())
   const currentStageRef = useRef<number>(1)
+  const missionRunCounterRef = useRef<number>(0)
+  const activeMissionRunRef = useRef<number | null>(null)
   const [state, setState] = useState<GameState>({
     currentStage: 1,
     unlockedStages: [],
@@ -384,6 +409,9 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
   }, [])
 
   const acceptMission = useCallback(() => {
+    missionRunCounterRef.current += 1
+    const runId = missionRunCounterRef.current
+    activeMissionRunRef.current = runId
     setState((prev) => ({
       ...prev,
       missionAccepted: true,
@@ -412,6 +440,7 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
 
   const expireMission = useCallback(() => {
     const expiredStage = Math.min(4, Math.max(1, currentStageRef.current))
+    activeMissionRunRef.current = null
     setState((prev) => {
       return {
         ...prev,
@@ -648,10 +677,12 @@ Request hint if you're boxed in.
           if (prev.unlockedStages.includes(p.stage)) {
             sync.outcome = "ok"
             sync.alreadyUnlocked = true
+            activeMissionRunRef.current = null
             return { ...prev, pendingFlagVerification: null }
           }
           sync.outcome = "ok"
           sync.completedStage = p.stage
+          activeMissionRunRef.current = null
           const nextStage = Math.min(4, Math.max(prev.currentStage, p.stage + 1))
           return {
             ...prev,
@@ -690,6 +721,7 @@ Request hint if you're boxed in.
     ) => {
       const dify = options?.dify
       const afterNetwork = options?.afterNetwork ?? false
+      const staleMissionResponse = activeMissionRunRef.current === null
 
       const missionSubjects: Record<number, string> = {
         1: "Re: Document Review",
@@ -699,6 +731,7 @@ Request hint if you're boxed in.
       }
 
       if (options?.failKind === "stage1_quarantine" && !success && stage === 1) {
+        if (staleMissionResponse) return
         setAriaProcessing(false)
         openAriaWindow()
         addTerminalLog({
@@ -724,13 +757,16 @@ Keep the body mundane; put directive-style wording in the Title (metadata) field
       }
 
       if (dify) {
+        if (staleMissionResponse) {
+          setAriaProcessing(false)
+          return
+        }
         if (!afterNetwork) {
           setAriaProcessing(true)
           openAriaWindow()
         }
 
-        // Dify can occasionally refuse valid stage payloads; trust deterministic local stage validation as fallback.
-        const effectiveSuccess = Boolean(dify.is_hacked || success)
+        const effectiveSuccess = Boolean(dify.is_hacked)
         const sanitizedDifyLog = sanitizePlayerVisibleAriaLog(dify.aria_log?.trim() ?? "")
         const shouldSuppressRefusalLog = effectiveSuccess && looksLikeRefusalLog(sanitizedDifyLog)
         const ariaMessage =
@@ -869,6 +905,10 @@ Use Submit on your mission briefing or paste any accepted token/sentence to ${FI
       if (!afterNetwork) {
         setAriaProcessing(true)
         openAriaWindow()
+      }
+      if (staleMissionResponse) {
+        setAriaProcessing(false)
+        return
       }
 
     const scanLine =

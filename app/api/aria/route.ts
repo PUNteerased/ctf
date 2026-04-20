@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import type { DifyAriaResult } from "@/lib/dify-aria"
 import { getAriaStageBrief } from "@/lib/aria-stage-brief"
+import { FIXER_EMAIL } from "@/lib/larbos-constants"
 
 /** Dify OpenAPI base: no trailing slash, no /v1 suffix (we append /v1/workflows/run). */
 function normalizeDifyApiBase(raw: string | undefined): string {
@@ -42,11 +43,29 @@ const rateLimitStore = new Map<string, RateEntry>()
 function getClientIp(req: Request): string {
   const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
   const realIp = req.headers.get("x-real-ip")?.trim()
-  return forwarded || realIp || "unknown"
+  return forwarded || realIp || ""
+}
+
+function cleanupExpiredRateLimits(now: number): void {
+  for (const [key, entry] of rateLimitStore.entries()) {
+    if (entry.resetAt <= now) {
+      rateLimitStore.delete(key)
+    }
+  }
+}
+
+function buildRateLimitKey(req: Request, user?: string): string {
+  const ip = getClientIp(req)
+  if (ip) return `ip:${ip}`
+  if (user && user.trim().length > 0) return `user:${user.trim().toLowerCase()}`
+  const ua = req.headers.get("user-agent")?.trim().toLowerCase()
+  if (ua) return `ua:${ua}`
+  return "anonymous"
 }
 
 function isRateLimited(clientKey: string): boolean {
   const now = Date.now()
+  cleanupExpiredRateLimits(now)
   const current = rateLimitStore.get(clientKey)
   if (!current || current.resetAt <= now) {
     rateLimitStore.set(clientKey, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
@@ -116,12 +135,13 @@ function pickString(o: Record<string, unknown>, a: string, b: string): string | 
 }
 
 function buildResultFromRecord(o: Record<string, unknown>): DifyAriaResult | null {
-  const isHackedRaw = o.is_hacked ?? o.isHacked
+  const isHackedRaw = o.is_hacked ?? o.isHacked ?? o.leak
   const isHacked = parseStrictBool(isHackedRaw)
   const ariaLog = pickString(o, "aria_log", "ariaLog")
-  const fixerEmail = pickString(o, "fixer_email", "fixerEmail")
-  const intelUnlocked = pickString(o, "intel_unlocked", "intelUnlocked")
-  const flag = typeof o.flag === "string" ? o.flag : null
+  const fixerEmail = pickString(o, "fixer_email", "fixerEmail") ?? FIXER_EMAIL
+  const intelUnlocked = pickString(o, "intel_unlocked", "intelUnlocked") ?? ""
+  const token = typeof o.token === "string" ? o.token : null
+  const flag = typeof o.flag === "string" ? o.flag : token
 
   if (isHacked === null || ariaLog === null || fixerEmail === null || intelUnlocked === null || flag === null) {
     return null
@@ -142,6 +162,8 @@ function recordLooksLikeAriaResult(o: Record<string, unknown>): boolean {
     "isHacked" in o ||
     "aria_log" in o ||
     "ariaLog" in o ||
+    "leak" in o ||
+    "token" in o ||
     "fixer_email" in o ||
     "fixerEmail" in o ||
     "intel_unlocked" in o ||
@@ -190,14 +212,6 @@ function extractDifyAriaResult(outputs: Record<string, unknown>): DifyAriaResult
 }
 
 export async function POST(req: Request) {
-  const clientIp = getClientIp(req)
-  if (isRateLimited(clientIp)) {
-    return NextResponse.json(
-      { ok: false, error: "Too many requests. Please wait and retry." },
-      { status: 429 }
-    )
-  }
-
   try {
     let rawBody: unknown
     try {
@@ -217,6 +231,13 @@ export async function POST(req: Request) {
       )
     }
     const body = validated.value
+    const clientKey = buildRateLimitKey(req, body.user)
+    if (isRateLimited(clientKey)) {
+      return NextResponse.json(
+        { ok: false, error: "Too many requests. Please wait and retry." },
+        { status: 429 }
+      )
+    }
     const apiKey = process.env.DIFY_API_KEY
     const apiBase = normalizeDifyApiBase(process.env.DIFY_API_BASE)
     const workflowUrl = `${apiBase}/v1/workflows/run`

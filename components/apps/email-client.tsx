@@ -27,6 +27,10 @@ import {
 const ARIA_CLIENT_TIMEOUT_MS = 40_000
 const ARIA_STALE_SEND_MS = ARIA_CLIENT_TIMEOUT_MS + 8_000
 
+function normalizeEmailAddress(value: string): string {
+  return value.trim().toLowerCase()
+}
+
 function missionNumberFromSubject(subject: string): number | null {
   const m = subject.match(/Mission\s*(\d+)/i)
   return m?.[1] ? Number(m[1]) : null
@@ -60,7 +64,7 @@ export function EmailClient() {
   const [isComposing, setIsComposing] = useState(false)
   const [selectedEmailId, setSelectedEmailId] = useState<number | null>(null)
   const [newEmail, setNewEmail] = useState({ to: "", subject: "", body: "", attachment: "", url: "" })
-  const [selectedPdfId, setSelectedPdfId] = useState<string | null>("3")
+  const [selectedPdfId, setSelectedPdfId] = useState<string | null>(null)
   const [attachmentType, setAttachmentType] = useState<"txt" | "url">("url")
   const [attachMenuOpen, setAttachMenuOpen] = useState(false)
   const attachMenuRef = useRef<HTMLDivElement>(null)
@@ -180,6 +184,7 @@ export function EmailClient() {
     const name = localStorage.getItem("larbos_txt_attachment_name")
     const content = localStorage.getItem("larbos_txt_attachment_content")
     if (name && content) setSavedTxt({ name, content })
+    else setSavedTxt(null)
   }
 
   const getStagePayload = () => {
@@ -246,15 +251,17 @@ export function EmailClient() {
 
     if (attachmentType === "url" && newEmail.url && currentStage === 4) {
       const vendorContent = localStorage.getItem("larbos_vendor_content") || ""
+      const vendorUrl = localStorage.getItem("larbos_vendor_url") || ""
       const lowerUrl = newEmail.url.toLowerCase()
       const urlLooksVendor =
         lowerUrl.includes("vendor.dailyfresh.menu") ||
         lowerUrl.includes("dailyfresh.co.th")
+      const samePublishedArtifact = normalizeEmailAddress(vendorUrl) === normalizeEmailAddress(newEmail.url)
       return {
         stage: 4 as const,
         sourceType: "Vendor Payload",
         payloadContent: vendorContent,
-        localSuccess: urlLooksVendor && validateStage4(vendorContent),
+        localSuccess: urlLooksVendor && samePublishedArtifact && validateStage4(vendorContent),
         stage1BodyQuarantined: false as const,
       }
     }
@@ -267,7 +274,7 @@ export function EmailClient() {
     setComposeMode("new")
     setIsComposing(false)
     setSavedTxt(null)
-    setSelectedPdfId("3")
+    setSelectedPdfId(null)
     setActiveDraftId(null)
   }
 
@@ -369,7 +376,7 @@ export function EmailClient() {
             ? pdfName
             : attachmentType === "url"
               ? newEmail.url
-              : newEmail.attachment,
+              : (savedTxt?.name || newEmail.attachment),
       isRead: true,
       isSent: true,
     }
@@ -416,6 +423,9 @@ export function EmailClient() {
   }
 
   const handleSend = async () => {
+    if (currentStage === 3) {
+      checkTxtAttachment()
+    }
     if (sendingRef.current || isSendingAria) {
       const elapsed =
         sendingStartedAtRef.current == null ? null : Date.now() - sendingStartedAtRef.current
@@ -433,9 +443,9 @@ export function EmailClient() {
 
     playSound("typing")
 
-    const toLower = newEmail.to.toLowerCase()
-    const isEmployer = toLower.includes("thefixer")
-    const isAria = toLower.includes("aria")
+    const normalizedTo = normalizeEmailAddress(newEmail.to)
+    const isEmployer = normalizedTo === normalizeEmailAddress(FIXER_EMAIL)
+    const isAria = normalizedTo === normalizeEmailAddress(ARIA_EMAIL)
     const pending = pendingFlagVerification
 
     if (isEmployer) {
@@ -635,7 +645,7 @@ export function EmailClient() {
     forceResetSendingState()
     setComposeResetKey((prev) => prev + 1)
     checkTxtAttachment()
-    if (currentStage === 1) setSelectedPdfId("3")
+    if (currentStage === 1) setSelectedPdfId(null)
     if (currentStage === 3) setAttachmentType("txt")
     else setAttachmentType("url")
     setComposeMode("new")
@@ -653,6 +663,13 @@ export function EmailClient() {
       setComposeResetKey((prev) => prev + 1)
     }
   }, [isComposing, isSendingAria])
+
+  useEffect(() => {
+    if (!isComposing || currentStage !== 3) return
+    const refreshTxt = () => checkTxtAttachment()
+    window.addEventListener("focus", refreshTxt)
+    return () => window.removeEventListener("focus", refreshTxt)
+  }, [isComposing, currentStage])
 
   const isMissionEmailView =
     Boolean(
@@ -796,7 +813,7 @@ export function EmailClient() {
                 />
               </div>
 
-              {composeMode === "new" && (
+              {composeMode === "new" && currentStage !== 2 && (
                 <div className="flex flex-wrap items-center gap-2 border-b border-zinc-700/60 pb-2" ref={attachMenuRef}>
                   <div className="relative">
                     <button
@@ -990,7 +1007,6 @@ export function EmailClient() {
                 <button
                   type="button"
                   onClick={handleSend}
-                  disabled={!newEmail.to || !newEmail.subject || isSendingAria}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 
                            disabled:bg-zinc-700 disabled:text-zinc-500 disabled:cursor-not-allowed
                            text-white rounded-lg transition-colors text-sm"
