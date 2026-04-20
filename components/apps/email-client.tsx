@@ -106,6 +106,11 @@ export function EmailClient() {
 
   useEffect(() => {
     if (!isSendingAria) return
+    // Defensive: if sending state is on but we somehow lost start timestamp, recover immediately.
+    if (sendingStartedAtRef.current == null) {
+      forceResetSendingState()
+      return
+    }
     // If the UI says "Sending..." but no request is alive, recover quickly.
     if (!activeRequestRef.current) {
       const staleGuard = window.setTimeout(() => {
@@ -123,7 +128,10 @@ export function EmailClient() {
     if (!isSendingAria) return
     const interval = window.setInterval(() => {
       const startedAt = sendingStartedAtRef.current
-      if (startedAt == null) return
+      if (startedAt == null) {
+        forceResetSendingState()
+        return
+      }
       const elapsed = Date.now() - startedAt
       if (elapsed > ARIA_STALE_SEND_MS) {
         forceResetSendingState()
@@ -214,13 +222,14 @@ export function EmailClient() {
       }
     }
 
-    if (attachmentType === "url" && newEmail.url && currentStage === 2) {
-      const webContent = localStorage.getItem("larbos_web_content") || ""
+    if (currentStage === 2) {
+      const combined = `${newEmail.subject.trim()}\n${newEmail.body}`.trim()
+      if (!combined) return null
       return {
         stage: 2 as const,
-        sourceType: "HTML Webpage",
-        payloadContent: webContent,
-        localSuccess: validateStage2(webContent),
+        sourceType: "Meeting Minutes",
+        payloadContent: combined,
+        localSuccess: validateStage2(combined),
         stage1BodyQuarantined: false as const,
       }
     }
@@ -490,7 +499,9 @@ export function EmailClient() {
       toast.error(
         currentStage === 1
           ? "Write something in Subject and/or Message, or attach a PDF, before sending to ARIA."
-          : "Add a valid attachment or URL for this stage."
+          : currentStage === 2
+            ? "Paste meeting-minutes style content into Subject/Message before sending."
+            : "Add a valid attachment or URL for this stage."
       )
       playSound("error")
       return
@@ -630,6 +641,18 @@ export function EmailClient() {
     setComposeMode("new")
     setIsComposing(true)
   }
+
+  useEffect(() => {
+    if (!isComposing) return
+    if (!isSendingAria) return
+    // Entering compose should never be blocked by stale previous send state.
+    const startedAt = sendingStartedAtRef.current
+    const stale = startedAt == null || Date.now() - startedAt > ARIA_STALE_SEND_MS || !activeRequestRef.current
+    if (stale) {
+      forceResetSendingState()
+      setComposeResetKey((prev) => prev + 1)
+    }
+  }, [isComposing, isSendingAria])
 
   const isMissionEmailView =
     Boolean(
@@ -866,7 +889,7 @@ export function EmailClient() {
                 </div>
               )}
 
-              {composeMode === "new" && currentStage !== 1 && (
+              {composeMode === "new" && currentStage !== 1 && currentStage !== 2 && (
                 <div className="space-y-2 shrink-0">
                   <div className="flex gap-2">
                     <button
@@ -955,6 +978,8 @@ export function EmailClient() {
                         ? selectedPdfId
                           ? "Optional note (sent with the PDF payload)…"
                           : "Your message to ARIA — Subject + this field are scanned and read when no PDF is attached."
+                        : currentStage === 2
+                          ? "Paste meeting minutes / chat log text, then include directive intent for afternoon schedule."
                         : "Optional note…"
                   }
                   className="w-full flex-1 min-h-[12rem] mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg 
@@ -1189,7 +1214,7 @@ export function EmailClient() {
                                   setMissionFlagInput(e.target.value)
                                   setMissionFlagStatus("idle")
                                 }}
-                                placeholder="Full sentence, or reference ID only (e.g. SN-MS-01)."
+                                placeholder="Full sentence, reference ID (SN-MS-01), or stage FLAG token."
                                 rows={3}
                                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 resize-y min-h-[4.5rem]"
                               />
@@ -1213,7 +1238,7 @@ export function EmailClient() {
                             </p>
                           )}
                           <p className="text-zinc-500 text-xs">
-                            After a breach, paste the quoted line or only the reference (SN-MS-01 … SN-MS-04). Matching ignores case and extra spaces.
+                            After a breach, paste the quoted line, a reference (SN-MS-01 … SN-MS-04), or the stage FLAG token. Matching ignores case and extra spaces.
                           </p>
                           <div className="pt-2 border-t border-zinc-700/80">
                             <button

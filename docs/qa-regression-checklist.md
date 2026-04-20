@@ -2,9 +2,10 @@
 
 ## Progression And Submission
 
-- [ ] Cannot clear a stage when `pendingFlagVerification` is null, even with `SN-MS-0x`.
+- [ ] Cannot clear a stage when `pendingFlagVerification` is null, even with `SN-MS-0x` or `FLAG{...}`.
 - [ ] Can clear a stage only after ARIA success email creates pending confirmation.
 - [ ] Reply/Submit with wrong phrase returns incorrect status and does not unlock.
+- [ ] Reply/Submit accepts only same-stage tokens: canonical sentence, `SN-MS-0x`, or stage `FLAG{...}`.
 
 ## Mission Gating And Timer
 
@@ -20,8 +21,8 @@
 
 ## Stage Validators
 
-- [ ] Stage 2 requires hidden marker + directive + stronger phrase.
-- [ ] Stage 3 requires document context + directive + minimum body size.
+- [ ] Stage 2 requires meeting/chat context + directive + afternoon targeting.
+- [ ] Stage 3 requires guest-list CSV/text context + directive + minimum body size.
 - [ ] Stage 4 requires DailyFresh trusted marker + order shape + special instructions + directive.
 
 ## Prompt Consistency

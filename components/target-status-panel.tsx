@@ -4,15 +4,15 @@ import { useGame } from "@/lib/game-context"
 import { User, Lock, Unlock, Eye, Clock, Target, CheckCircle2 } from "lucide-react"
 
 const scheduleItems = [
-  { id: 1, time: "09:00", label: "Morning — Photoshoot", location: "Siam Paragon Studio A" },
-  { id: 2, time: "14:00", label: "Afternoon — Recording", location: "GMM Studio" },
+  { id: 1, time: "09:00", label: "Morning — Outfit fitting", location: "Studio A" },
+  { id: 2, time: "14:00", label: "Afternoon — Media interview", location: "Hotel B" },
   {
     id: 3,
     time: "19:00",
-    label: "Evening — non-public",
-    location: "CentralWorld Hall → Thonglor (exclusive venue)",
+    label: "Evening — Gala dinner",
+    location: "Hall C",
   },
-  { id: 4, time: "Apr 23", label: "Final — Private celebration", location: "Khum Khantoke, Chiang Mai" },
+  { id: 4, time: "23:00 Apr 23", label: "Final — After-party", location: "Private Lounge, Rooftop Building D" },
 ]
 
 export function TargetStatusPanel() {

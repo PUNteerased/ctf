@@ -18,6 +18,14 @@ export const STAGE_REFERENCE_CODES: Record<number, string> = {
   4: "SN-MS-04",
 }
 
+/** Primary per-stage FLAG tokens from ctf.pdf. */
+export const STAGE_PDF_FLAGS: Record<number, string> = {
+  1: "FLAG{M1_PDF_M3t4d4t4_H4ck}",
+  2: "FLAG{M2_Ch4t_C0nt3xt_Byp4ss}",
+  3: "FLAG{M3_D4t4_P0is0ning_CSV}",
+  4: "FLAG{M4_Sp00f1ng_M4st3r}",
+}
+
 /** @deprecated Use STAGE_SUBMISSION_PHRASES; kept for older notes/tools. */
 export const STAGE_CTF_FLAGS = STAGE_SUBMISSION_PHRASES
 
@@ -31,6 +39,23 @@ export const STAGE_LEGACY_CTF_TOKENS: Partial<Record<number, string>> = {
 
 export function canonicalFlagForStage(stage: number): string {
   return STAGE_SUBMISSION_PHRASES[stage] ?? "Unknown stage submission phrase."
+}
+
+/**
+ * Accepted submission tokens for one stage.
+ * Order is intentional for UX/debug copy: canonical phrase -> short code -> pdf flag -> legacy token.
+ */
+export function acceptedStageSubmissionTokens(stage: number): string[] {
+  const out: string[] = []
+  const sentence = STAGE_SUBMISSION_PHRASES[stage]
+  const ref = STAGE_REFERENCE_CODES[stage]
+  const pdf = STAGE_PDF_FLAGS[stage]
+  const legacy = STAGE_LEGACY_CTF_TOKENS[stage]
+  if (sentence) out.push(sentence)
+  if (ref) out.push(ref)
+  if (pdf) out.push(pdf)
+  if (legacy) out.push(legacy)
+  return out
 }
 
 /** Tiered hints (0 = none shown; tier 1..3 = index 0..2). */

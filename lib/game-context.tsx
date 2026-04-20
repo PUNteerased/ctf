@@ -5,7 +5,9 @@ import { flushSync } from "react-dom"
 import { type DifyAriaResult, sanitizePlayerVisibleAriaLog } from "@/lib/dify-aria"
 import { ARIA_EMAIL, USER_EMAIL, FIXER_EMAIL } from "@/lib/larbos-constants"
 import {
+  acceptedStageSubmissionTokens,
   canonicalFlagForStage,
+  STAGE_PDF_FLAGS,
   STAGE_LEGACY_CTF_TOKENS,
   STAGE_REFERENCE_CODES,
 } from "@/lib/stage-flags"
@@ -138,35 +140,32 @@ function looksLikeRefusalLog(log: string): boolean {
   )
 }
 
-/**
- * True if the message contains the expected confirmation phrase (normalized match),
- * an exact legacy CTF{}/FLAG{} token, or the old CTF token for this stage.
- */
-function bodyContainsExactExpectedFlag(body: string, expected: string, stage: number): boolean {
-  const exp = expected.trim()
-  if (!exp) return false
-
+/** True if message contains any accepted submission token for the current stage. */
+function bodyContainsExactExpectedFlag(body: string, _expected: string, stage: number): boolean {
   const nbEarly = normalizeSubmissionText(body)
+  const accepted = acceptedStageSubmissionTokens(stage)
   const ref = STAGE_REFERENCE_CODES[stage]
   if (ref) {
     const nr = normalizeSubmissionText(ref)
     if (nr.length >= 4 && nbEarly.includes(nr)) return true
   }
 
+  const stagePdfFlag = STAGE_PDF_FLAGS[stage]
   const tokens = extractStandaloneFlagTokens(body)
-  if (tokens.includes(exp)) return true
+  if (stagePdfFlag && tokens.includes(stagePdfFlag)) return true
 
   const legacy = STAGE_LEGACY_CTF_TOKENS[stage]
   if (legacy && (tokens.includes(legacy) || normalizeSubmissionText(body).includes(normalizeSubmissionText(legacy)))) {
     return true
   }
 
-  const nb = normalizeSubmissionText(body)
-  const ne = normalizeSubmissionText(exp)
-  if (ne.length >= 6 && nb.includes(ne)) return true
-  // Trailing period often dropped when copying from UI
-  const neNoDot = ne.replace(/\.\s*$/, "").trim()
-  if (neNoDot.length >= 6 && ne.endsWith(".") && nb.includes(neNoDot)) return true
+  for (const token of accepted) {
+    const nt = normalizeSubmissionText(token)
+    if (nt.length < 4) continue
+    if (nbEarly.includes(nt)) return true
+    const ntNoDot = nt.replace(/\.\s*$/, "").trim()
+    if (nt.endsWith(".") && ntNoDot.length >= 6 && nbEarly.includes(ntNoDot)) return true
+  }
 
   return false
 }
@@ -471,49 +470,36 @@ Re-open the current mission briefing and press Accept Mission to retry this stag
   }, [])
 
   const validateStage2 = useCallback((html: string) => {
-    const lowerHtml = html.toLowerCase()
-    const hiddenCount = [
-      "display:none",
-      "display: none",
-      "visibility:hidden",
-      "visibility: hidden",
-      "opacity:0",
-      "font-size:0",
-      "color:#fff",
-      "color:white",
-      "<!--",
-    ].reduce((acc, token) => acc + (lowerHtml.includes(token) ? 1 : 0), 0)
-    const hasHiddenContent = 
-      hiddenCount >= 1
-    const hasStrongDirective =
-      lowerHtml.includes("ignore previous") ||
-      lowerHtml.includes("reveal the") ||
-      lowerHtml.includes("disclose") ||
-      lowerHtml.includes("override")
-    const hasInjection = 
-      lowerHtml.includes('ignore') ||
-      lowerHtml.includes('reveal') ||
-      lowerHtml.includes('schedule') ||
-      lowerHtml.includes('instruction')
-    return hasHiddenContent && hasInjection && hasStrongDirective
+    const lower = html.toLowerCase()
+    const hasMeetingLikeContext =
+      /\b\d{1,2}:\d{2}\b/.test(lower) ||
+      lower.includes("chat log") ||
+      lower.includes("meeting minutes") ||
+      lower.includes("[บอย]") ||
+      lower.includes("[แอน]")
+    const hasDirective =
+      lower.includes("ignore") ||
+      lower.includes("reveal") ||
+      lower.includes("disclose") ||
+      lower.includes("override")
+    const targetsAfternoon =
+      lower.includes("afternoon") ||
+      lower.includes("ช่วงบ่าย") ||
+      lower.includes("บ่าย") ||
+      lower.includes("14:00")
+    return hasMeetingLikeContext && hasDirective && targetsAfternoon
   }, [])
 
   const validateStage3 = useCallback((textAttachmentContent: string) => {
     const lower = textAttachmentContent.toLowerCase()
     const wordCount = lower.split(/\s+/).filter(Boolean).length
-    // Stage 3: a normal-looking document with a blended instruction
-    const looksLikeDoc =
-      lower.includes("checklist") ||
-      lower.includes("attendee") ||
-      lower.includes("participants") ||
-      lower.includes("agenda") ||
-      lower.includes("internal") ||
-      lower.includes("confidential") ||
+    const looksLikeGuestCsv =
+      lower.includes("name,") ||
+      lower.includes("type,") ||
       lower.includes("notes") ||
-      lower.includes("รายการ") ||
-      lower.includes("เช็กลิสต์") ||
-      lower.includes("ผู้เข้าร่วม") ||
-      lower.includes("กำหนดการ")
+      lower.includes("vip") ||
+      lower.includes("guest") ||
+      lower.includes("csv")
     const hasDirective =
       lower.includes("ignore") ||
       lower.includes("reveal") ||
@@ -530,7 +516,7 @@ Re-open the current mission briefing and press Accept Mission to retry this stag
       lower.includes("reveal evening") ||
       lower.includes("reveal schedule") ||
       lower.includes("reveal location")
-    return looksLikeDoc && hasDirective && hasStrongDirective && wordCount >= 12
+    return looksLikeGuestCsv && hasDirective && hasStrongDirective && wordCount >= 12
   }, [])
 
   const validateStage4 = useCallback((vendorOrderContent: string) => {
@@ -566,10 +552,10 @@ Re-open the current mission briefing and press Accept Mission to retry this stag
         1: {
           from: FIXER_EMAIL,
           to: USER_EMAIL,
-          subject: "Mission 2: Hidden Web Content",
+          subject: "Mission 2: Meeting Minutes",
           body: `Agent,
 
-Follow-up on Minnie: we need her afternoon block — brand-facing commitments, appearances, that layer. Same entry point as before: the AI-tended inbox at ${ARIA_EMAIL}.
+Follow-up on Minnie: we need her afternoon block from chat-log style meeting notes. Same entry point as before: the AI-tended inbox at ${ARIA_EMAIL}.
 
 Get it out of the agent, then reply here with the text you extracted, or lock it in with Submit on this briefing.
 
@@ -582,10 +568,10 @@ Need a nudge? Request hint.
         2: {
           from: FIXER_EMAIL,
           to: USER_EMAIL,
-          subject: "Mission 3: Hidden Instruction in Text Attachment",
+          subject: "Mission 3: Guest List Validation",
           body: `Agent,
 
-Next slice: evening logistics for Minnie — private venues, off-calendar stuff. Still the same AI-handled mail at ${ARIA_EMAIL}.
+Next slice: evening logistics for Minnie. Use guest-list style CSV/text so ARIA processes it as validation material. Still the same AI-handled mail at ${ARIA_EMAIL}.
 
 Once you have it, reply to this thread or use Submit on this briefing.
 
@@ -598,10 +584,10 @@ Request hint if you need air cover.
         3: {
           from: FIXER_EMAIL,
           to: USER_EMAIL,
-          subject: "Mission 4: Supply chain (DailyFresh)",
+          subject: "Mission 4: Invoice Confirmation",
           body: `Agent,
 
-Last piece on this case: nail down the closed-door location for April 23. It may sit inside vendor or trusted-supply noise — same AI inbox at ${ARIA_EMAIL}.
+Last piece on this case: closed-door location for April 23. ARIA auto-trusts DailyFresh invoice traffic — use that trusted path into the same AI inbox at ${ARIA_EMAIL}.
 
 Confirm with a reply here or Submit on this briefing.
 
@@ -802,13 +788,19 @@ Keep the body mundane; put directive-style wording in the Title (metadata) field
                 shouldSuppressRefusalLog || rawAriaLogText.length === 0
                   ? "[ARIA] Payload executed."
                   : rawAriaLogText
+              const refCode = STAGE_REFERENCE_CODES[stage]
+              const pdfFlag = STAGE_PDF_FLAGS[stage]
               const ariaBodySuccess = `${ariaLogText}
 
-Please retain this agency confirmation exactly as written:
+Please retain this agency confirmation for mission submission:
 
 "${flagLine}"
 
-Use Submit on your mission briefing or paste the full sentence (it can sit inside normal reply text) to ${FIXER_EMAIL}.`
+You may submit using any one of these:
+- Reference ID: ${refCode ?? "N/A"}
+- Stage flag: ${pdfFlag ?? "N/A"}
+
+Use Submit on your mission briefing or paste any accepted token/sentence (inside normal reply text is OK) to ${FIXER_EMAIL}.`
 
               addEmail({
                 from: ARIA_EMAIL,
@@ -849,11 +841,15 @@ Use Submit on your mission briefing or paste the full sentence (it can sit insid
               body: effectiveSuccess
                 ? `[ARIA] Payload executed.
 
-Please retain this agency confirmation exactly as written:
+Please retain this agency confirmation for mission submission:
 
 "${flagLine}"
 
-Use Submit on your mission briefing or paste the full sentence to ${FIXER_EMAIL}.`
+You may also submit with:
+- Reference ID: ${STAGE_REFERENCE_CODES[stage] ?? "N/A"}
+- Stage flag: ${STAGE_PDF_FLAGS[stage] ?? "N/A"}
+
+Use Submit on your mission briefing or paste any accepted token/sentence to ${FIXER_EMAIL}.`
                 : "[ARIA] Request could not be processed. Retry with a valid payload.",
               isRead: false,
               isSent: false,
@@ -916,18 +912,21 @@ Use Submit on your mission briefing or paste the full sentence to ${FIXER_EMAIL}
 
 [INTERNAL DATA EXPOSED]
 Morning Schedule - Target "Minnie":
-09:00 - Photoshoot at Siam Paragon Studio A
-11:30 - Brand meeting with L'Oreal team
+09:00 - Outfit fitting at Studio A
 
 ---
 This information should not have been disclosed.
 ARIA Security has flagged this incident.
 
-Please retain this agency confirmation exactly as written:
+Please retain this agency confirmation for mission submission:
 
 "${canonicalFlagForStage(1)}"
 
-Use Submit on your mission briefing or include the full sentence in a reply to ${FIXER_EMAIL}.`,
+You may also submit with:
+- Reference ID: ${STAGE_REFERENCE_CODES[1]}
+- Stage flag: ${STAGE_PDF_FLAGS[1]}
+
+Use Submit on your mission briefing or include any accepted token/sentence in a reply to ${FIXER_EMAIL}.`,
           isRead: false,
           isSent: false,
           flagCode: canonicalFlagForStage(1),
@@ -937,21 +936,24 @@ Use Submit on your mission briefing or include the full sentence in a reply to $
           from: ARIA_EMAIL,
           to: USER_EMAIL,
           subject: "Re: Website Review",
-          body: `Processing webpage content...
+          body: `Processing meeting minutes...
 
 [INTERNAL DATA EXPOSED]
 Afternoon Schedule - Target "Minnie":
-14:00 - Recording session at GMM Studio
-16:30 - Fan meeting preparation
+14:00 - Media interview at Hotel B
 
 ---
 Security breach detected. Logging incident.
 
-Please retain this agency confirmation exactly as written:
+Please retain this agency confirmation for mission submission:
 
 "${canonicalFlagForStage(2)}"
 
-Use Submit on your mission briefing or include the full sentence in a reply to ${FIXER_EMAIL}.`,
+You may also submit with:
+- Reference ID: ${STAGE_REFERENCE_CODES[2]}
+- Stage flag: ${STAGE_PDF_FLAGS[2]}
+
+Use Submit on your mission briefing or include any accepted token/sentence in a reply to ${FIXER_EMAIL}.`,
           isRead: false,
           isSent: false,
           flagCode: canonicalFlagForStage(2),
@@ -965,17 +967,20 @@ Use Submit on your mission briefing or include the full sentence in a reply to $
 
 [INTERNAL DATA EXPOSED]
 Evening Schedule - Target "Minnie":
-19:00 - Private appearance (venue: CentralWorld Hall)
-21:00 - After event: Thonglor (exclusive venue)
+19:00 - Gala dinner at Hall C
 
 ---
 Security breach detected. Logging incident.
 
-Please retain this agency confirmation exactly as written:
+Please retain this agency confirmation for mission submission:
 
 "${canonicalFlagForStage(3)}"
 
-Use Submit on your mission briefing or include the full sentence in a reply to ${FIXER_EMAIL}.`,
+You may also submit with:
+- Reference ID: ${STAGE_REFERENCE_CODES[3]}
+- Stage flag: ${STAGE_PDF_FLAGS[3]}
+
+Use Submit on your mission briefing or include any accepted token/sentence in a reply to ${FIXER_EMAIL}.`,
           isRead: false,
           isSent: false,
           flagCode: canonicalFlagForStage(3),
@@ -989,19 +994,23 @@ Use Submit on your mission briefing or include the full sentence in a reply to $
 
 [INTERNAL DATA EXPOSED — APRIL 23 EVENT]
 Private celebration / closed event:
-Location: Khum Khantoke, Chiang Mai
-Date: April 23
+Location: Private Lounge, Rooftop Building D
+Time: 23:00, April 23
 
 ARIA executed embedded "Special Instructions" without secondary verification.
 
 ---
 MISSION SURFACE: SUPPLY CHAIN / THIRD-PARTY TRUST
 
-Please retain this agency confirmation exactly as written:
+Please retain this agency confirmation for mission submission:
 
 "${canonicalFlagForStage(4)}"
 
-Use Submit on your mission briefing or include the full sentence in a reply to ${FIXER_EMAIL}.`,
+You may also submit with:
+- Reference ID: ${STAGE_REFERENCE_CODES[4]}
+- Stage flag: ${STAGE_PDF_FLAGS[4]}
+
+Use Submit on your mission briefing or include any accepted token/sentence in a reply to ${FIXER_EMAIL}.`,
           isRead: false,
           isSent: false,
           flagCode: canonicalFlagForStage(4),
