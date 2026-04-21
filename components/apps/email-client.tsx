@@ -1006,6 +1006,7 @@ export function EmailClient() {
               <div className="flex flex-wrap gap-2 pt-1 pb-2 shrink-0">
                 <button
                   type="button"
+                  data-testid="compose-send"
                   onClick={handleSend}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 
                            disabled:bg-zinc-700 disabled:text-zinc-500 disabled:cursor-not-allowed

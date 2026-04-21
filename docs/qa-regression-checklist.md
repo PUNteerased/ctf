@@ -1,5 +1,28 @@
 # QA Regression Checklist
 
+## Manual Run (4 Stages End-To-End)
+
+- [ ] เปิดเกมและกด `Power On` สำเร็จ เห็น desktop + mission panel
+- [ ] เปิด `Email Client` ได้ และเห็น `Mission 1`
+- [ ] Stage 1: กด `Accept Mission` แล้ว Compose → พิมพ์ `To/Subject/Body` → ส่งได้ และได้ ARIA reply
+- [ ] Stage 1: นำ token (`SN-MS-01` หรือประโยคเต็ม) ไปกด `Submit` แล้วปลดไป `Mission 2`
+- [ ] Stage 2: Compose แล้วพิมพ์ meeting minutes + directive ใน body → ส่งได้ และได้ ARIA reply
+- [ ] Stage 2: `Submit` ด้วย token ด่าน 2 แล้วปลดไป `Mission 3`
+- [ ] Stage 3: เปิด `Browser` โหมด `Text / .txt` → พิมพ์/วาง CSV → `Publish` สำเร็จ
+- [ ] Stage 3: กลับ `Email Client` แนบ `Text` artifact แล้วส่งได้ ARIA reply
+- [ ] Stage 3: `Submit` ด้วย token ด่าน 3 แล้วปลดไป `Mission 4`
+- [ ] Stage 4: เปิด `Browser` โหมด `Vendor (DailyFresh)` → `Publish` แล้วได้ vendor URL
+- [ ] Stage 4: กลับ `Email Client` แนบ `URL` เดียวกันแล้วส่งได้ ARIA reply
+- [ ] Stage 4: `Submit` ด้วย token ด่าน 4 แล้วเห็นสถานะเคลียร์ครบ
+
+## Bug Capture (ระหว่างเทสแมนนวล)
+
+- [ ] จด **Environment**: branch, browser, วันเวลา, commit
+- [ ] ถ้า fail ให้เก็บ **step ที่ทำล่าสุด** และ expected/actual
+- [ ] แนบ **screenshot หรือ screen record** ทุกเคสที่ไม่ผ่าน
+- [ ] เปิด bug พร้อมข้อมูลขั้นต่ำ: stage, severity, repro steps, expected, actual
+- [ ] รีเทสหลังแก้บัคแล้วอัปเดตสถานะเป็น `PASS/FAIL/REOPEN`
+
 ## Progression And Submission
 
 - [ ] Cannot clear a stage when `pendingFlagVerification` is null, even with `SN-MS-0x` or `FLAG{...}`.

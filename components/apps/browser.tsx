@@ -236,6 +236,7 @@ Trusted source: vendor.dailyfresh.menu`)
             )}
           </div>
           <textarea
+            data-testid="browser-main-editor"
             value={editorValue}
             onChange={(e) => setEditorValue(e.target.value)}
             className="flex-1 w-full min-h-[200px] p-4 bg-zinc-950 text-zinc-300 font-mono text-sm 
