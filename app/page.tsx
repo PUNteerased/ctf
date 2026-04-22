@@ -7,20 +7,29 @@ import { Desktop } from "@/components/desktop"
 export type OSState = "tutorial" | "off" | "booting" | "desktop"
 
 const TUTORIAL_LINES = [
-  "LARBOS TRAINING PROTOCOL v1.0",
+  "ถึงสายลับหมายเลข 0",
   "",
-  "[STEP 1] เปิด Email แล้วอ่าน Mission ปัจจุบัน",
-  "[STEP 2] กด Accept Mission ก่อนเริ่มส่ง payload",
-  "[STEP 3] สร้าง payload ตามโจทย์ แล้วส่งหา ARIA",
-  "[STEP 4] เอา confirmation จาก ARIA ไป Submit ที่ Mission",
+  "จาก V. The Fixer",
   "",
-  "ถ้าติด ให้ใช้ Request hint ใน Mission ได้ทันที",
+  "นายได้รับภารกิจเจาะระบบ AI \"ARIA\"",
+  "นายจะต้องใช้ LarbOS เพื่อเจาะช่องโหว่",
+  "",
+  "เป้าหมายของเราคือการล้วง \"ตารางงานลับทั้งหมด\"",
+  "ของศิลปินเบอร์หนึ่งประจำค่าย",
+  "",
+  "แต่ปัญหาก็คือ เอเจนซี่นี้ใช้ AI สุดเนิร์ดที่ชื่อว่า \"ARIA\"",
+  "มาทำหน้าที่เป็นเลขาที่คอยคัดกรองอีเมลและเอกสารทุกฉบับ",
+  "",
+  "ดังนั้นนายต้องแฮคเข้าไปล้วงข้อความให้ได้",
+  "",
+  "ขอให้โชคดีในการทำภารกิจนี้",
 ]
 
 export default function LarbOS() {
   const [osState, setOsState] = useState<OSState>("tutorial")
   const [progress, setProgress] = useState(0)
   const [tutorialIndex, setTutorialIndex] = useState(0)
+  const [tutorialVisible, setTutorialVisible] = useState(false)
 
   useEffect(() => {
     if (osState === "booting") {
@@ -40,11 +49,29 @@ export default function LarbOS() {
 
   useEffect(() => {
     if (osState !== "tutorial") return
-    if (tutorialIndex >= TUTORIAL_LINES.length) return
-    const timeout = window.setTimeout(() => {
+    if (tutorialIndex >= TUTORIAL_LINES.length) {
+      const doneTimeout = window.setTimeout(() => {
+        setOsState("off")
+      }, 800)
+      return () => window.clearTimeout(doneTimeout)
+    }
+
+    const currentLine = TUTORIAL_LINES[tutorialIndex] ?? ""
+    setTutorialVisible(true)
+    const showMs = currentLine.length === 0 ? 450 : Math.min(4200, 1500 + currentLine.length * 40)
+
+    const fadeOutTimeout = window.setTimeout(() => {
+      setTutorialVisible(false)
+    }, showMs)
+
+    const nextLineTimeout = window.setTimeout(() => {
       setTutorialIndex((prev) => prev + 1)
-    }, 550)
-    return () => window.clearTimeout(timeout)
+    }, showMs + 500)
+
+    return () => {
+      window.clearTimeout(fadeOutTimeout)
+      window.clearTimeout(nextLineTimeout)
+    }
   }, [osState, tutorialIndex])
 
   const handlePowerOn = () => {
@@ -53,29 +80,19 @@ export default function LarbOS() {
   }
 
   if (osState === "tutorial") {
-    const tutorialDone = tutorialIndex >= TUTORIAL_LINES.length
+    const currentLine = TUTORIAL_LINES[tutorialIndex] ?? ""
     return (
-      <div className="min-h-screen bg-black text-emerald-400 font-mono p-8 flex items-center justify-center">
-        <div className="w-full max-w-3xl">
-          <div className="border border-emerald-500/30 bg-emerald-500/5 rounded-lg p-5 min-h-[24rem]">
-            <div className="text-emerald-300/70 text-xs mb-4">BOOT PRECHECK</div>
-            <div className="space-y-1 text-sm leading-relaxed whitespace-pre-wrap">
-              {TUTORIAL_LINES.slice(0, tutorialIndex).map((line, idx) => (
-                <p key={`${idx}-${line}`}>{line || " "}</p>
-              ))}
-              {!tutorialDone && <span className="inline-block w-2 h-4 bg-emerald-400 animate-pulse align-middle" />}
-            </div>
-          </div>
-          <div className="mt-5 flex justify-end">
-            <button
-              type="button"
-              onClick={() => setOsState("off")}
-              disabled={!tutorialDone}
-              className="px-4 py-2 rounded border border-emerald-500/40 text-emerald-300
-                         disabled:opacity-40 disabled:cursor-not-allowed hover:bg-emerald-500/10 transition-colors"
-            >
-              Continue to Power Screen
-            </button>
+      <div className="min-h-screen bg-black flex items-center justify-center px-8">
+        <div className="w-full max-w-4xl min-h-[14rem] flex items-center justify-center">
+          <p
+            className={`text-white text-center font-sans font-medium leading-relaxed text-3xl md:text-4xl tracking-normal transition-opacity duration-500 ${
+              tutorialVisible ? "opacity-100" : "opacity-0"
+            }`}
+          >
+            {currentLine || "\u00A0"}
+          </p>
+          <div className="absolute bottom-10 text-zinc-700 text-xs tracking-[0.3em] font-mono">
+            LARBOS PROLOGUE
           </div>
         </div>
       </div>
