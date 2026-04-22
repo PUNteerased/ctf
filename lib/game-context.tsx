@@ -48,7 +48,6 @@ interface GameState {
   /** 0 = none shown; 1–3 = tier index + 1 (player-driven hints on mission view). */
   missionHintTier: number
   emails: MissionEmail[]
-  soundEnabled: boolean
   ariaWindowOpen: boolean
   /** After breach: wait until player submits ARIA’s confirmation phrase (exact text, normalized match) */
   pendingFlagVerification: {
@@ -72,7 +71,6 @@ interface GameContextType extends GameState {
   addEmail: (email: Omit<MissionEmail, "id">) => void
   markEmailRead: (id: number) => void
   markEmailSubmitted: (id: number) => void
-  toggleSound: () => void
   openAriaWindow: () => void
   setAriaWindowOpen: (open: boolean) => void
   playSound: (sound: "boot" | "typing" | "notification" | "warning" | "success" | "error") => void
@@ -192,30 +190,9 @@ function bodyContainsExactExpectedFlag(body: string, expected: string, stage: nu
   return false
 }
 
-// Audio cache
-const audioCache: Record<string, HTMLAudioElement> = {}
-
-let sharedAudioContext: AudioContext | null = null
-function getSharedAudioContext(): AudioContext | null {
-  if (typeof window === "undefined") return null
-  try {
-    if (!sharedAudioContext || sharedAudioContext.state === "closed") {
-      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      sharedAudioContext = new AC()
-    }
-    if (sharedAudioContext.state === "suspended") {
-      void sharedAudioContext.resume()
-    }
-    return sharedAudioContext
-  } catch {
-    return null
-  }
-}
-
 export function GameProvider({ children }: { children: ReactNode }) {
   const isMountedRef = useRef(true)
   const timeoutIdsRef = useRef<Set<number>>(new Set())
-  const soundEnabledRef = useRef(true)
   const emailIdRef = useRef<number>(Date.now())
   const currentStageRef = useRef<number>(1)
   const missionRunCounterRef = useRef<number>(0)
@@ -258,14 +235,9 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
         isSent: false,
       },
     ],
-    soundEnabled: true,
     ariaWindowOpen: false,
     pendingFlagVerification: null,
   })
-
-  useEffect(() => {
-    soundEnabledRef.current = state.soundEnabled
-  }, [state.soundEnabled])
 
   useEffect(() => {
     currentStageRef.current = state.currentStage
@@ -289,65 +261,8 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
     }
   }, [])
 
-  const playSound = useCallback((sound: "boot" | "typing" | "notification" | "warning" | "success" | "error") => {
-    if (!soundEnabledRef.current) return
-
-    const audioContext = getSharedAudioContext()
-    if (!audioContext) return
-
-    try {
-    const oscillator = audioContext.createOscillator()
-    const gainNode = audioContext.createGain()
-
-    oscillator.connect(gainNode)
-    gainNode.connect(audioContext.destination)
-
-    switch (sound) {
-      case "boot":
-        oscillator.frequency.value = 440
-        gainNode.gain.value = 0.1
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.5)
-        break
-      case "typing":
-        oscillator.frequency.value = 800
-        gainNode.gain.value = 0.05
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.05)
-        break
-      case "notification":
-        oscillator.frequency.value = 880
-        gainNode.gain.value = 0.1
-        oscillator.start()
-        oscillator.frequency.setValueAtTime(1100, audioContext.currentTime + 0.1)
-        oscillator.stop(audioContext.currentTime + 0.2)
-        break
-      case "warning":
-        oscillator.frequency.value = 200
-        oscillator.type = "square"
-        gainNode.gain.value = 0.1
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.3)
-        break
-      case "success":
-        oscillator.frequency.value = 523
-        gainNode.gain.value = 0.1
-        oscillator.start()
-        oscillator.frequency.setValueAtTime(659, audioContext.currentTime + 0.1)
-        oscillator.frequency.setValueAtTime(784, audioContext.currentTime + 0.2)
-        oscillator.stop(audioContext.currentTime + 0.3)
-        break
-      case "error":
-        oscillator.frequency.value = 200
-        oscillator.type = "sawtooth"
-        gainNode.gain.value = 0.1
-        oscillator.start()
-        oscillator.stop(audioContext.currentTime + 0.2)
-        break
-    }
-    } catch {
-      /* ignore AudioContext / device errors */
-    }
+  const playSound = useCallback(() => {
+    // Sound system intentionally disabled.
   }, [])
 
   const addTerminalLog = useCallback((log: Omit<TerminalLog, "timestamp">) => {
@@ -479,10 +394,6 @@ Re-open the current mission briefing and press Accept Mission to retry this stag
       ...prev,
       emails: prev.emails.map((e) => (e.id === id ? { ...e, isSubmitted: true } : e)),
     }))
-  }, [])
-
-  const toggleSound = useCallback(() => {
-    setState((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))
   }, [])
 
   const openAriaWindow = useCallback(() => {
@@ -1050,7 +961,6 @@ value={{
   addEmail,
   markEmailRead,
   markEmailSubmitted,
-  toggleSound,
   openAriaWindow,
   setAriaWindowOpen,
   playSound,

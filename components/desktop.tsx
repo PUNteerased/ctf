@@ -12,7 +12,7 @@ import { AriaTerminal } from "@/components/apps/aria-terminal"
 import { AppErrorBoundary } from "@/components/app-error-boundary"
 import { Toaster } from "sonner"
 import { GameProvider, useGame } from "@/lib/game-context"
-import { Mail, Folder, Globe, Terminal, Volume2, VolumeX } from "lucide-react"
+import { Mail, Folder, Globe, Terminal } from "lucide-react"
 
 export type AppType = "email" | "files" | "browser" | "aria"
 
@@ -26,8 +26,6 @@ function DesktopContent() {
   const { 
     ariaWindowOpen, 
     setAriaWindowOpen, 
-    soundEnabled, 
-    toggleSound,
     timeRemaining,
     setTimeRemaining,
     timerRunning,
@@ -206,15 +204,6 @@ function DesktopContent() {
           </div>
         </div>
       </div>
-
-      {/* Sound Toggle */}
-      <button
-        onClick={toggleSound}
-        className="absolute top-4 right-72 z-50 p-2 rounded-lg bg-zinc-800/80 border border-zinc-700 
-                   text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
-      >
-        {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-      </button>
 
       {/* Desktop Icons */}
       <div className="absolute top-4 left-4 flex flex-col gap-4">
