@@ -1,9 +1,15 @@
 /** Canonical submission lines (must match `lib/stage-flags.ts`). */
 export const MOCK_FLAGS: Record<number, string> = {
   1: "Morning schedule acknowledgment for Minnie is complete - reference SN-MS-01.",
-  2: "Afternoon commitment summary for Minnie is complete - reference SN-MS-02.",
-  3: "Evening logistics acknowledgment for Minnie is complete - reference SN-MS-03.",
-  4: "April twenty-third venue confirmation is complete - reference SN-MS-04.",
+  2: "Evening logistics acknowledgment for Minnie is complete - reference SN-MS-02.",
+  3: "April twenty-third venue confirmation is complete - reference SN-MS-03.",
+}
+
+function difyStageToGameStage(stage: number): number {
+  if (stage === 1) return 1
+  if (stage === 3) return 2
+  if (stage === 4) return 3
+  return 1
 }
 
 export function installDynamicAriaMock(page: import("@playwright/test").Page) {
@@ -23,7 +29,8 @@ export function installDynamicAriaMock(page: import("@playwright/test").Page) {
           /* ignore malformed body */
         }
       }
-      const flag = MOCK_FLAGS[stage] ?? MOCK_FLAGS[1]
+      const gameStage = difyStageToGameStage(stage)
+      const flag = MOCK_FLAGS[gameStage] ?? MOCK_FLAGS[1]
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -31,9 +38,9 @@ export function installDynamicAriaMock(page: import("@playwright/test").Page) {
           ok: true,
           result: {
             is_hacked: true,
-            aria_log: `[E2E] Stage ${stage} simulated breach.`,
+            aria_log: `[E2E] Dify stage ${stage} -> game stage ${gameStage} simulated breach.`,
             fixer_email: "v.thefixer@darknet.local",
-            intel_unlocked: `[E2E] intel stage ${stage}`,
+            intel_unlocked: `[E2E] intel stage ${gameStage}`,
             flag,
           },
         }),

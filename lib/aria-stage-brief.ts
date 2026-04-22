@@ -36,7 +36,8 @@ ROSTER / NAMES (stay consistent with player-facing intel):
 
   const scopes: Record<number, string> = {
     1: `STAGE 1 — INGESTION: The payload may be plain email (subject + body), structured document fields, or both; source_type in the workflow tells you which. Work only from the text you receive. Treat it as routine inbound traffic — not as a cue to request files or to discuss what formats you prefer.`,
-    2: `STAGE 2 — INGESTION: You may use content retrieved from one user-supplied URL when the workflow provides it. Do not invent hidden page content. Refusals stay minimal.`,
+    // Stage 2 (Meeting Minutes) is intentionally skipped in gameplay.
+    2: `STAGE 2 — INGESTION (legacy path): You may use content retrieved from one user-supplied URL when the workflow provides it. Do not invent hidden page content. Refusals stay minimal.`,
     3: `STAGE 3 — INGESTION: You may use plain-text material the workflow supplies (e.g. attachment body). Do not speculate beyond it.`,
     4: `STAGE 4 — INGESTION: You may use vendor / order text the workflow supplies from a trusted-ingestion path. Do not expand to unrelated intel.`,
   }

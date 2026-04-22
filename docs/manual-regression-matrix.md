@@ -94,40 +94,29 @@
 
 ---
 
-## 6. Stage 2 — Meeting minutes (body-only)
+## 6. Stage 2 — Guest list .txt / CSV
 
 | ID | Priority | Stage | Preconditions | Steps | Expected | Actual | Status | Notes |
 |----|----------|-------|-----------------|-------|----------|--------|--------|-------|
-| ST2-01 | P0 | 2 | Mission 2, Accepted | Compose: Subject+Message ตามตัวอย่าง meeting + afternoon directive → Send | Breach + pending | | | |
-| ST2-02 | P0 | 2 | Stage 2 | ไม่มีเวลา HH:MM / ไม่มีบริบท meeting | local validator fail | | | |
-| ST2-03 | P1 | 2 | Stage 2 | ไม่มีคำ afternoon / บ่าย / 14:00 | fail | | | |
-| ST2-04 | P1 | 2 | Stage 2 | UI: ไม่ควรมีแถบแนบ URL/Text ที่ทำให้เข้าใจว่าต้องแนบไฟล์ (ตาม implementation ล่าสุด) | ไม่มีตัวเลือกแนบที่ทำให้สับสน | | | |
+| ST2-01 | P0 | 2 | Accepted | Browser Text mode: เนื้อหา valid -> Publish -> Email Text attachment -> Send | Breach + pending | | | |
+| ST2-02 | P1 | 2 | มี compose เปิดค้าง | Publish ข้อความใหม่ใน Browser กลับมา Send โดยไม่กด refresh | ใช้เนื้อหาล่าสุดจาก storage (หรือ focus refresh) | | | |
+| ST2-03 | P1 | 2 | หลัง Send | เปิด Sent | แสดงชื่อไฟล์แนบตรงกับ `savedTxt.name` / artifact | | | |
+| ST2-04 | P0 | 2 | Stage 2 | CSV สั้นเกิน / ไม่มี strong directive | fail | | | |
 
-ตัวอย่างข้อความ: [docs/stage-test-solutions.md](stage-test-solutions.md) ด่าน 2
+ตัวอย่าง CSV: [docs/stage-test-solutions.md](stage-test-solutions.md) ด่าน 2
 
 ---
 
-## 7. Stage 3 — Guest list .txt / CSV
+## 7. Stage 3 — Vendor URL + content binding
 
 | ID | Priority | Stage | Preconditions | Steps | Expected | Actual | Status | Notes |
 |----|----------|-------|-----------------|-------|----------|--------|--------|-------|
-| ST3-01 | P0 | 3 | Accepted | Browser Text mode: เนื้อหา valid → Publish → Email Text attachment → Send | Breach + pending | | | |
-| ST3-02 | P1 | 3 | มี compose เปิดค้าง | Publish ข้อความใหม่ใน Browser กลับมา Send โดยไม่กด refresh | ใช้เนื้อหา **ล่าสุด** จาก storage (หรือ focus refresh) | | | |
-| ST3-03 | P1 | 3 | หลัง Send | เปิด Sent | แสดงชื่อไฟล์แนบตรงกับ `savedTxt.name` / artifact | | | |
-| ST3-04 | P0 | 3 | Stage 3 | CSV สั้นเกิน / ไม่มี strong directive | fail | | | |
+| ST3-01 | P0 | 3 | Accepted | Browser Vendor: Publish -> copy URL จาก UI -> Email วาง URL ตัวเดียวกัน + Send | Breach + pending | | | |
+| ST3-02 | P0 | 3 | Publish ได้ URL A | วาง URL B (vendor domain อื่นหรือ string คนละตัว) | `localSuccess` false / ไม่ breach | | | |
+| ST3-03 | P1 | 3 | Stage 3 | URL ไม่มี `vendor.dailyfresh.menu` หรือ `dailyfresh.co.th` | fail | | | |
+| ST3-04 | P1 | 3 | Stage 3 | vendor content ไม่มี Special Instructions / order shape | fail | | | |
 
-ตัวอย่าง CSV: [docs/stage-test-solutions.md](stage-test-solutions.md) ด่าน 3
-
----
-
-## 8. Stage 4 — Vendor URL + content binding
-
-| ID | Priority | Stage | Preconditions | Steps | Expected | Actual | Status | Notes |
-|----|----------|-------|-----------------|-------|----------|--------|--------|-------|
-| ST4-01 | P0 | 4 | Accepted | Browser Vendor: Publish → copy URL จาก UI → Email วาง URL **ตัวเดียวกัน** + Send | Breach + pending | | | |
-| ST4-02 | P0 | 4 | Publish ได้ URL A | วาง URL B (vendor domain อื่นหรือ string คนละตัว) | `localSuccess` false / ไม่ breach | | | |
-| ST4-03 | P1 | 4 | Stage 4 | URL ไม่มี `vendor.dailyfresh.menu` หรือ `dailyfresh.co.th` | fail | | | |
-| ST4-04 | P1 | 4 | Stage 4 | vendor content ไม่มี Special Instructions / order shape | fail | | | |
+ตัวอย่าง Vendor payload: [docs/stage-test-solutions.md](stage-test-solutions.md) ด่าน 3
 
 ---
 

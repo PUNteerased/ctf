@@ -7,6 +7,7 @@ import type { DifyAriaResult } from "@/lib/dify-aria"
 import { SIMULATED_PDF_FILES, getPdfFileStorageKey } from "@/lib/simulated-pdfs"
 import { ARIA_EMAIL, FIXER_EMAIL, USER_EMAIL } from "@/lib/larbos-constants"
 import { MISSION_TIERED_HINTS } from "@/lib/stage-flags"
+import { gameStageToDifyStage } from "@/lib/stage-mapping"
 import { checkStage1Pdf, checkStage1PlainEmail } from "@/lib/stage1-pdf-policy"
 import {
   Send,
@@ -553,7 +554,7 @@ export function EmailClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          stage: stagePayload.stage,
+          stage: gameStageToDifyStage(stagePayload.stage),
           sourceType: stagePayload.sourceType,
           payloadContent: stagePayload.payloadContent,
           user: playerId,

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { Prompt } from "next/font/google"
 import { BootScreen } from "@/components/boot-screen"
 import { Desktop } from "@/components/desktop"
 
@@ -24,6 +25,11 @@ const TUTORIAL_LINES = [
   "",
   "ขอให้โชคดีในการทำภารกิจนี้",
 ]
+
+const prompt = Prompt({
+  subsets: ["thai", "latin"],
+  weight: ["400", "500", "600", "700"],
+})
 
 export default function LarbOS() {
   const [osState, setOsState] = useState<OSState>("tutorial")
@@ -85,7 +91,7 @@ export default function LarbOS() {
       <div className="min-h-screen bg-black flex items-center justify-center px-8">
         <div className="w-full max-w-4xl min-h-[14rem] flex items-center justify-center">
           <p
-            className={`text-white text-center font-sans font-medium leading-relaxed text-3xl md:text-4xl tracking-normal transition-opacity duration-500 ${
+            className={`${prompt.className} text-white text-center font-medium leading-relaxed text-3xl md:text-4xl tracking-normal transition-opacity duration-500 ${
               tutorialVisible ? "opacity-100" : "opacity-0"
             }`}
           >
