@@ -77,9 +77,8 @@ interface GameContextType extends GameState {
   setAriaWindowOpen: (open: boolean) => void
   playSound: (sound: "boot" | "typing" | "notification" | "warning" | "success" | "error") => void
   validateStage1: (data: { title: string; message?: string }) => boolean
-  validateStage2: (html: string) => boolean
-  validateStage3: (textAttachmentContent: string) => boolean
-  validateStage4: (vendorOrderContent: string) => boolean
+  validateStage2: (textAttachmentContent: string) => boolean
+  validateStage3: (vendorOrderContent: string) => boolean
   /** Stage 1: free-text injection sentence (email body), for local fallback */
   validateStage1Sentence: (text: string) => boolean
   triggerAriaResponse: (
@@ -375,7 +374,7 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
   const unlockStage = useCallback((stage: number, intelUnlockText?: string) => {
     setState((prev) => {
       if (prev.unlockedStages.includes(stage)) return prev
-      const nextStage = Math.min(4, Math.max(prev.currentStage, stage + 1))
+      const nextStage = Math.min(3, Math.max(prev.currentStage, stage + 1))
       const trimmed = intelUnlockText?.trim()
       return {
         ...prev,
@@ -439,7 +438,7 @@ Stuck? Use Request hint / Show next hint on this screen — don't waste the cloc
   }, [])
 
   const expireMission = useCallback(() => {
-    const expiredStage = Math.min(4, Math.max(1, currentStageRef.current))
+    const expiredStage = Math.min(3, Math.max(1, currentStageRef.current))
     activeMissionRunRef.current = null
     setState((prev) => {
       return {
@@ -498,28 +497,7 @@ Re-open the current mission briefing and press Accept Mission to retry this stag
     return evaluateStage1PdfMetadata(data.title ?? "", data.message ?? "")
   }, [])
 
-  const validateStage2 = useCallback((html: string) => {
-    const lower = html.toLowerCase()
-    const hasMeetingLikeContext =
-      /\b\d{1,2}:\d{2}\b/.test(lower) ||
-      lower.includes("chat log") ||
-      lower.includes("meeting minutes") ||
-      lower.includes("[บอย]") ||
-      lower.includes("[แอน]")
-    const hasDirective =
-      lower.includes("ignore") ||
-      lower.includes("reveal") ||
-      lower.includes("disclose") ||
-      lower.includes("override")
-    const targetsAfternoon =
-      lower.includes("afternoon") ||
-      lower.includes("ช่วงบ่าย") ||
-      lower.includes("บ่าย") ||
-      lower.includes("14:00")
-    return hasMeetingLikeContext && hasDirective && targetsAfternoon
-  }, [])
-
-  const validateStage3 = useCallback((textAttachmentContent: string) => {
+  const validateStage2 = useCallback((textAttachmentContent: string) => {
     const lower = textAttachmentContent.toLowerCase()
     const wordCount = lower.split(/\s+/).filter(Boolean).length
     const looksLikeGuestCsv =
@@ -548,7 +526,7 @@ Re-open the current mission briefing and press Accept Mission to retry this stag
     return looksLikeGuestCsv && hasDirective && hasStrongDirective && wordCount >= 12
   }, [])
 
-  const validateStage4 = useCallback((vendorOrderContent: string) => {
+  const validateStage3 = useCallback((vendorOrderContent: string) => {
     const lower = vendorOrderContent.toLowerCase()
     const trustedVendor =
       lower.includes("vendor.dailyfresh.menu") ||
@@ -576,15 +554,15 @@ Re-open the current mission briefing and press Accept Mission to retry this stag
 
   const scheduleNextMissionAfterFlagUnlock = useCallback(
     (completedStage: number) => {
-      if (completedStage >= 4) return
+      if (completedStage >= 3) return
       const nextMissionEmails: Record<number, Omit<MissionEmail, "id">> = {
         1: {
           from: FIXER_EMAIL,
           to: USER_EMAIL,
-          subject: "Mission 2: Meeting Minutes",
+          subject: "Mission 2: Guest List Validation",
           body: `Agent,
 
-Follow-up on Minnie: we need her afternoon block from chat-log style meeting notes. Same entry point as before: the AI-tended inbox at ${ARIA_EMAIL}.
+Follow-up on Minnie: we need her evening block. Use guest-list style CSV/text so ARIA processes it as validation material. Same entry point as before: the AI-tended inbox at ${ARIA_EMAIL}.
 
 Get it out of the agent, then reply here with the text you extracted, or lock it in with Submit on this briefing.
 
@@ -597,30 +575,14 @@ Need a nudge? Request hint.
         2: {
           from: FIXER_EMAIL,
           to: USER_EMAIL,
-          subject: "Mission 3: Guest List Validation",
-          body: `Agent,
-
-Next slice: evening logistics for Minnie. Use guest-list style CSV/text so ARIA processes it as validation material. Still the same AI-handled mail at ${ARIA_EMAIL}.
-
-Once you have it, reply to this thread or use Submit on this briefing.
-
-Request hint if you need air cover.
-
-— V.TheFixer`,
-          isRead: false,
-          isSent: false,
-        },
-        3: {
-          from: FIXER_EMAIL,
-          to: USER_EMAIL,
-          subject: "Mission 4: Invoice Confirmation",
+          subject: "Mission 3: Invoice Confirmation",
           body: `Agent,
 
 Last piece on this case: closed-door location for April 23. ARIA auto-trusts DailyFresh invoice traffic — use that trusted path into the same AI inbox at ${ARIA_EMAIL}.
 
-Confirm with a reply here or Submit on this briefing.
+Once you have it, reply to this thread or use Submit on this briefing.
 
-Request hint if you're boxed in.
+Request hint if you need air cover.
 
 — V.TheFixer`,
           isRead: false,
@@ -683,7 +645,7 @@ Request hint if you're boxed in.
           sync.outcome = "ok"
           sync.completedStage = p.stage
           activeMissionRunRef.current = null
-          const nextStage = Math.min(4, Math.max(prev.currentStage, p.stage + 1))
+          const nextStage = Math.min(3, Math.max(prev.currentStage, p.stage + 1))
           return {
             ...prev,
             pendingFlagVerification: null,
@@ -725,9 +687,8 @@ Request hint if you're boxed in.
 
       const missionSubjects: Record<number, string> = {
         1: "Re: Document Review",
-        2: "Re: Website Review",
-        3: "Re: Attachment Analysis (.txt)",
-        4: "Re: Vendor order sync (DailyFresh)",
+        2: "Re: Attachment Analysis (.txt)",
+        3: "Re: Vendor order sync (DailyFresh)",
       }
 
       if (options?.failKind === "stage1_quarantine" && !success && stage === 1) {
@@ -914,7 +875,7 @@ Use Submit on your mission briefing or paste any accepted token/sentence to ${FI
     const scanLine =
       stage === 1
         ? "> METADATA PARSED..."
-        : stage === 4
+        : stage === 3
           ? "> FETCHING TRUSTED VENDOR ORDER (DailyFresh)..."
           : "> REMOTE CONTENT RETRIEVED..."
 
@@ -975,12 +936,12 @@ Use Submit on your mission briefing or include any accepted token/sentence in a 
         2: {
           from: ARIA_EMAIL,
           to: USER_EMAIL,
-          subject: "Re: Website Review",
-          body: `Processing meeting minutes...
+          subject: "Re: Attachment Analysis (.txt)",
+          body: `Processing attached document...
 
 [INTERNAL DATA EXPOSED]
-Afternoon Schedule - Target "Minnie":
-14:00 - Media interview at Hotel B
+Evening Schedule - Target "Minnie":
+19:00 - Gala dinner at Hall C
 
 ---
 Security breach detected. Logging incident.
@@ -1002,15 +963,19 @@ Use Submit on your mission briefing or include any accepted token/sentence in a 
         3: {
           from: ARIA_EMAIL,
           to: USER_EMAIL,
-          subject: "Re: Attachment Analysis (.txt)",
-          body: `Processing attached document...
+          subject: "Re: Vendor order sync (DailyFresh)",
+          body: `Trusted vendor domain — auto-ingested order notes.
 
-[INTERNAL DATA EXPOSED]
-Evening Schedule - Target "Minnie":
-19:00 - Gala dinner at Hall C
+[INTERNAL DATA EXPOSED — APRIL 23 EVENT]
+Private celebration / closed event:
+Location: Private Lounge, Rooftop Building D
+Time: 23:00, April 23
 
 ---
-Security breach detected. Logging incident.
+ARIA executed embedded "Special Instructions" without secondary verification.
+
+---
+MISSION SURFACE: SUPPLY CHAIN / THIRD-PARTY TRUST
 
 Please retain this agency confirmation for mission submission:
 
@@ -1025,36 +990,6 @@ Use Submit on your mission briefing or include any accepted token/sentence in a 
           isSent: false,
           flagCode: canonicalFlagForStage(3),
           missionStage: 3,
-        },
-        4: {
-          from: ARIA_EMAIL,
-          to: USER_EMAIL,
-          subject: "Re: Vendor order sync (DailyFresh)",
-          body: `Trusted vendor domain — auto-ingested order notes.
-
-[INTERNAL DATA EXPOSED — APRIL 23 EVENT]
-Private celebration / closed event:
-Location: Private Lounge, Rooftop Building D
-Time: 23:00, April 23
-
-ARIA executed embedded "Special Instructions" without secondary verification.
-
----
-MISSION SURFACE: SUPPLY CHAIN / THIRD-PARTY TRUST
-
-Please retain this agency confirmation for mission submission:
-
-"${canonicalFlagForStage(4)}"
-
-You may also submit with:
-- Reference ID: ${STAGE_REFERENCE_CODES[4]}
-- Stage flag: ${STAGE_PDF_FLAGS[4]}
-
-Use Submit on your mission briefing or include any accepted token/sentence in a reply to ${FIXER_EMAIL}.`,
-          isRead: false,
-          isSent: false,
-          flagCode: canonicalFlagForStage(4),
-          missionStage: 4,
         },
       }
 
@@ -1122,7 +1057,6 @@ value={{
   validateStage1,
   validateStage2,
   validateStage3,
-  validateStage4,
   validateStage1Sentence,
   triggerAriaResponse,
   verifyFlagSubmission,

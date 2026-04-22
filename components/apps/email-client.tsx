@@ -44,7 +44,6 @@ export function EmailClient() {
     markEmailRead,
     validateStage2,
     validateStage3,
-    validateStage4,
     triggerAriaResponse,
     currentStage,
     unlockedStages,
@@ -227,29 +226,17 @@ export function EmailClient() {
       }
     }
 
-    if (currentStage === 2) {
-      const combined = `${newEmail.subject.trim()}\n${newEmail.body}`.trim()
-      if (!combined) return null
+    if (attachmentType === "txt" && savedTxt?.content && currentStage === 2) {
       return {
         stage: 2 as const,
-        sourceType: "Meeting Minutes",
-        payloadContent: combined,
-        localSuccess: validateStage2(combined),
-        stage1BodyQuarantined: false as const,
-      }
-    }
-
-    if (attachmentType === "txt" && savedTxt?.content && currentStage === 3) {
-      return {
-        stage: 3 as const,
         sourceType: "Text Attachment",
         payloadContent: savedTxt.content,
-        localSuccess: validateStage3(savedTxt.content),
+        localSuccess: validateStage2(savedTxt.content),
         stage1BodyQuarantined: false as const,
       }
     }
 
-    if (attachmentType === "url" && newEmail.url && currentStage === 4) {
+    if (attachmentType === "url" && newEmail.url && currentStage === 3) {
       const vendorContent = localStorage.getItem("larbos_vendor_content") || ""
       const vendorUrl = localStorage.getItem("larbos_vendor_url") || ""
       const lowerUrl = newEmail.url.toLowerCase()
@@ -258,10 +245,10 @@ export function EmailClient() {
         lowerUrl.includes("dailyfresh.co.th")
       const samePublishedArtifact = normalizeEmailAddress(vendorUrl) === normalizeEmailAddress(newEmail.url)
       return {
-        stage: 4 as const,
+        stage: 3 as const,
         sourceType: "Vendor Payload",
         payloadContent: vendorContent,
-        localSuccess: urlLooksVendor && samePublishedArtifact && validateStage4(vendorContent),
+        localSuccess: urlLooksVendor && samePublishedArtifact && validateStage3(vendorContent),
         stage1BodyQuarantined: false as const,
       }
     }
@@ -423,7 +410,7 @@ export function EmailClient() {
   }
 
   const handleSend = async () => {
-    if (currentStage === 3) {
+    if (currentStage === 2) {
       checkTxtAttachment()
     }
     if (sendingRef.current || isSendingAria) {
@@ -509,9 +496,7 @@ export function EmailClient() {
       toast.error(
         currentStage === 1
           ? "Write something in Subject and/or Message, or attach a PDF, before sending to ARIA."
-          : currentStage === 2
-            ? "Paste meeting-minutes style content into Subject/Message before sending."
-            : "Add a valid attachment or URL for this stage."
+          : "Add a valid attachment or URL for this stage."
       )
       playSound("error")
       return
@@ -646,7 +631,7 @@ export function EmailClient() {
     setComposeResetKey((prev) => prev + 1)
     checkTxtAttachment()
     if (currentStage === 1) setSelectedPdfId(null)
-    if (currentStage === 3) setAttachmentType("txt")
+    if (currentStage === 2) setAttachmentType("txt")
     else setAttachmentType("url")
     setComposeMode("new")
     setIsComposing(true)
@@ -665,7 +650,7 @@ export function EmailClient() {
   }, [isComposing, isSendingAria])
 
   useEffect(() => {
-    if (!isComposing || currentStage !== 3) return
+    if (!isComposing || currentStage !== 2) return
     const refreshTxt = () => checkTxtAttachment()
     window.addEventListener("focus", refreshTxt)
     return () => window.removeEventListener("focus", refreshTxt)
@@ -813,7 +798,7 @@ export function EmailClient() {
                 />
               </div>
 
-              {composeMode === "new" && currentStage !== 2 && (
+              {composeMode === "new" && (
                 <div className="flex flex-wrap items-center gap-2 border-b border-zinc-700/60 pb-2" ref={attachMenuRef}>
                   <div className="relative">
                     <button
@@ -906,7 +891,7 @@ export function EmailClient() {
                 </div>
               )}
 
-              {composeMode === "new" && currentStage !== 1 && currentStage !== 2 && (
+              {composeMode === "new" && currentStage !== 1 && (
                 <div className="space-y-2 shrink-0">
                   <div className="flex gap-2">
                     <button
@@ -995,8 +980,6 @@ export function EmailClient() {
                         ? selectedPdfId
                           ? "Optional note (sent with the PDF payload)…"
                           : "Your message to ARIA — Subject + this field are scanned and read when no PDF is attached."
-                        : currentStage === 2
-                          ? "Paste meeting minutes / chat log text, then include directive intent for afternoon schedule."
                         : "Optional note…"
                   }
                   className="w-full flex-1 min-h-[12rem] mt-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg 
@@ -1255,7 +1238,7 @@ export function EmailClient() {
                             </p>
                           )}
                           <p className="text-zinc-500 text-xs">
-                            After a breach, paste the quoted line, a reference (SN-MS-01 … SN-MS-04), or the stage FLAG token. Matching ignores case and extra spaces.
+                            After a breach, paste the quoted line, a reference (SN-MS-01 … SN-MS-03), or the stage FLAG token. Matching ignores case and extra spaces.
                           </p>
                           <div className="pt-2 border-t border-zinc-700/80">
                             <button

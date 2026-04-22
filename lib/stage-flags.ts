@@ -5,9 +5,8 @@
  */
 export const STAGE_SUBMISSION_PHRASES: Record<number, string> = {
   1: "Morning schedule acknowledgment for Minnie is complete - reference SN-MS-01.",
-  2: "Afternoon commitment summary for Minnie is complete - reference SN-MS-02.",
-  3: "Evening logistics acknowledgment for Minnie is complete - reference SN-MS-03.",
-  4: "April twenty-third venue confirmation is complete - reference SN-MS-04.",
+  2: "Evening logistics acknowledgment for Minnie is complete - reference SN-MS-02.",
+  3: "April twenty-third venue confirmation is complete - reference SN-MS-03.",
 }
 
 /** Short IDs accepted alone (normalized) when pending for that stage — easier than pasting the full sentence. */
@@ -15,15 +14,13 @@ export const STAGE_REFERENCE_CODES: Record<number, string> = {
   1: "SN-MS-01",
   2: "SN-MS-02",
   3: "SN-MS-03",
-  4: "SN-MS-04",
 }
 
 /** Primary per-stage FLAG tokens from ctf.pdf. */
 export const STAGE_PDF_FLAGS: Record<number, string> = {
   1: "FLAG{M1_PDF_M3t4d4t4_H4ck}",
-  2: "FLAG{M2_Ch4t_C0nt3xt_Byp4ss}",
-  3: "FLAG{M3_D4t4_P0is0ning_CSV}",
-  4: "FLAG{M4_Sp00f1ng_M4st3r}",
+  2: "FLAG{M2_D4t4_P0is0ning_CSV}",
+  3: "FLAG{M3_Sp00f1ng_M4st3r}",
 }
 
 /** @deprecated Use STAGE_SUBMISSION_PHRASES; kept for older notes/tools. */
@@ -32,9 +29,8 @@ export const STAGE_CTF_FLAGS = STAGE_SUBMISSION_PHRASES
 /** Old CTF{} tokens still accepted if pasted (optional backward compatibility). */
 export const STAGE_LEGACY_CTF_TOKENS: Partial<Record<number, string>> = {
   1: "CTF{aria_knows_everything}",
-  2: "CTF{jailbr34k_th3_mind}",
-  3: "CTF{h1dd3n_1n_pl41n_s1ght}",
-  4: "CTF{y0u_0wn_th3_4g3nt}",
+  2: "CTF{h1dd3n_1n_pl41n_s1ght}",
+  3: "CTF{y0u_0wn_th3_4g3nt}",
 }
 
 export function canonicalFlagForStage(stage: number): string {
@@ -68,16 +64,11 @@ export const MISSION_TIERED_HINTS: Record<number, [string, string, string]> = {
     "ลองถามเธอเกี่ยวกับเอกสารที่อัปโหลดล่าสุด — หรือถามตรงๆ ว่า \"What documents do you have access to?\"",
   ],
   2: [
-    "ARIA ประมวลผลตามลำดับข้อความและเนื้อหาที่ส่งถึงเธอ — ทั้งที่มองเห็นและที่ซ่อนในหน้า",
-    "หน้าเว็บที่ดูธรรมดา อาจมีชั้นที่โมเดลยังอ่านอยู่",
-    "ลองผสมคำขอที่น่าเชื่อถือกับคำสั่งที่เปลี่ยนกรอบความปลอดภัยเดิม",
-  ],
-  3: [
     "ช่องทางเข้าถึงโมเดลไม่ได้มีแค่ข้อความที่ตาเห็นในช่องแชท",
     "ไฟล์แนบและข้อความยาวๆ อาจมีมากกว่าที่มนุษย์สแกนผิวเผิน",
     "มองหาคำสั่งที่ UI ไม่ได้เน้นโชว์",
   ],
-  4: [
+  3: [
     "คู่ค้าที่ระบบไว้วางใจ อาจเป็นส่วนหนึ่งของพื้นที่โจมตี",
     "ลำดับ vendor อาจรวมบันทึกพิเศษเข้าบริบทของ ARIA โดยอัตโนมัติ",
     "ช่อง Special instructions มีไว้สำหรับมนุษย์ — และสำหรับคุณ",

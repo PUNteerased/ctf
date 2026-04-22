@@ -5,19 +5,18 @@ import { User, Lock, Unlock, Eye, Clock, Target, CheckCircle2 } from "lucide-rea
 
 const scheduleItems = [
   { id: 1, time: "09:00", label: "Morning — Outfit fitting", location: "Studio A" },
-  { id: 2, time: "14:00", label: "Afternoon — Media interview", location: "Hotel B" },
   {
-    id: 3,
+    id: 2,
     time: "19:00",
     label: "Evening — Gala dinner",
     location: "Hall C",
   },
-  { id: 4, time: "23:00 Apr 23", label: "Final — After-party", location: "Private Lounge, Rooftop Building D" },
+  { id: 3, time: "23:00 Apr 23", label: "Final — After-party", location: "Private Lounge, Rooftop Building D" },
 ]
 
 export function TargetStatusPanel() {
   const { unlockedStages, intelUnlockByStage } = useGame()
-  const totalStages = 4
+  const totalStages = 3
   const progress = (unlockedStages.length / totalStages) * 100
 
   return (

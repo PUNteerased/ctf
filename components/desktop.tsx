@@ -186,7 +186,7 @@ function DesktopContent() {
           </div>
           <div className="flex items-center gap-1 flex-wrap" role="status" aria-label="สถานะด่าน">
             <span className="text-[10px] text-zinc-500 mr-0.5">ด่าน:</span>
-            {[1, 2, 3, 4].map((n) => {
+            {[1, 2, 3].map((n) => {
               const cleared = unlockedStages.includes(n)
               return (
                 <span
