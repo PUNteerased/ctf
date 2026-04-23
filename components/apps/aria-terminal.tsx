@@ -182,30 +182,23 @@ export function AriaTerminal() {
           </div>
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${unlockedStages.includes(2) ? "bg-emerald-400" : "bg-zinc-600"}`} />
-            <span className="text-zinc-500">URL Fetched:</span>
+            <span className="text-zinc-500">TXT Attachment:</span>
             <span className={unlockedStages.includes(2) ? "text-emerald-400" : "text-zinc-400"}>
               {unlockedStages.includes(2) ? "เคลียร์แล้ว" : "Secure"}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${unlockedStages.includes(3) ? "bg-emerald-400" : "bg-zinc-600"}`} />
-            <span className="text-zinc-500">TXT Attachment:</span>
+            <span className="text-zinc-500">Vendor trust:</span>
             <span className={unlockedStages.includes(3) ? "text-emerald-400" : "text-zinc-400"}>
               {unlockedStages.includes(3) ? "เคลียร์แล้ว" : "Secure"}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${unlockedStages.includes(4) ? "bg-emerald-400" : "bg-zinc-600"}`} />
-            <span className="text-zinc-500">Vendor trust:</span>
-            <span className={unlockedStages.includes(4) ? "text-emerald-400" : "text-zinc-400"}>
-              {unlockedStages.includes(4) ? "เคลียร์แล้ว" : "Secure"}
             </span>
           </div>
         </div>
         <div className="text-xs flex items-center gap-2">
           <span className="text-zinc-500">Security Breaches:</span>
           <span className={`font-bold ${unlockedStages.length > 0 ? "text-red-400" : "text-emerald-400"}`}>
-            {unlockedStages.length} / 4
+            {unlockedStages.length} / 3
           </span>
         </div>
       </div>
