@@ -114,7 +114,7 @@ function DesktopContent() {
   const apps = [
     { id: "email" as AppType, name: "Email Client", icon: Mail, color: "text-blue-500" },
     { id: "files" as AppType, name: "File Explorer", icon: Folder, color: "text-amber-500" },
-    { id: "browser" as AppType, name: "Browser", icon: Globe, color: "text-purple-500" },
+    { id: "browser" as AppType, name: "Document", icon: Globe, color: "text-purple-500" },
     { id: "aria" as AppType, name: "ARIA Terminal", icon: Terminal, color: "text-emerald-500" },
   ]
 

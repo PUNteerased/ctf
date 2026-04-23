@@ -927,7 +927,7 @@ export function EmailClient() {
                           type="text"
                           value={newEmail.attachment || savedTxt?.name || ""}
                           onChange={(e) => setNewEmail({ ...newEmail, attachment: e.target.value })}
-                          placeholder="Save .txt in Browser first"
+                          placeholder="Save .txt in Document first"
                           readOnly={!!savedTxt}
                           className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg 
                                text-white text-sm focus:outline-none focus:border-blue-500"
@@ -963,7 +963,7 @@ export function EmailClient() {
                           <Link2 className="w-4 h-4" />
                         </span>
                       </div>
-                      <p className="text-zinc-500 text-xs mt-1">Publish from Browser (HTML / Vendor), then paste.</p>
+                      <p className="text-zinc-500 text-xs mt-1">Publish from Document (Text / Vendor), then paste.</p>
                     </div>
                   )}
                 </div>
