@@ -85,10 +85,23 @@ export default function LarbOS() {
     setOsState("booting")
   }
 
+  const skipTutorial = () => {
+    setOsState("off")
+  }
+
   if (osState === "tutorial") {
     const currentLine = TUTORIAL_LINES[tutorialIndex] ?? ""
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center px-8">
+      <div className="min-h-screen bg-black flex items-center justify-center px-8 relative">
+        <button
+          type="button"
+          onClick={skipTutorial}
+          className="absolute top-6 right-6 z-10 px-3 py-1.5 text-sm font-medium text-zinc-500 border border-zinc-700/80 rounded-lg
+                     hover:text-zinc-200 hover:border-zinc-500 hover:bg-zinc-900/80 transition-colors"
+          aria-label="Skip tutorial"
+        >
+          ข้ามบทนำ / Skip
+        </button>
         <div className="w-full max-w-4xl min-h-[14rem] flex items-center justify-center">
           <p
             className={`${prompt.className} text-white text-center font-medium leading-relaxed text-3xl md:text-4xl tracking-normal transition-opacity duration-500 ${

@@ -1,6 +1,11 @@
 import { test, expect } from "@playwright/test"
-import { installDynamicAriaMock } from "./helpers/aria-mock"
-import { bootToDesktop, closeSecondWindowIfPresent, openBrowser, openEmailClient } from "./helpers/larbos-ui"
+import {
+  bootToDesktop,
+  closeSecondWindowIfPresent,
+  extractAriaConfirmationToken,
+  openBrowser,
+  openEmailClient,
+} from "./helpers/larbos-ui"
 
 const STAGE2_CSV = `Name,Type,Notes
 Guest01,VIP,None
@@ -14,10 +19,16 @@ async function submitFlagOnMission(page: import("@playwright/test").Page, missio
   await page.getByRole("button", { name: "Submit" }).click()
 }
 
+async function waitForAriaReply(page: import("@playwright/test").Page, subject: string) {
+  await expect(
+    page.getByText(subject).first(),
+    `Expected ARIA reply "${subject}" to appear in inbox`
+  ).toBeVisible({ timeout: 75_000 })
+}
+
 test.describe("All 3 missions (E2E)", () => {
-  test("ด่าน 1→3: Accept → ส่ง ARIA (mock) → Submit ต่อด่าน", async ({ page }) => {
-    test.setTimeout(240_000)
-    await installDynamicAriaMock(page)
+  test("ด่าน 1→3: Accept → ส่ง ARIA (real Dify) → Submit ต่อด่าน", async ({ page }) => {
+    test.setTimeout(420_000)
 
     await bootToDesktop(page)
     await openEmailClient(page)
@@ -28,12 +39,20 @@ test.describe("All 3 missions (E2E)", () => {
     await page.getByRole("button", { name: "Compose" }).click()
     await page.getByPlaceholder("aria@agency.com").fill("aria@agency.com")
     await page.locator('input[placeholder="Subject"]').fill("Stage 1 smoke")
-    await page.getByPlaceholder(/Your message to ARIA/i).fill("Plain body for stage 1 plain-email path.")
+    await page
+      .getByPlaceholder(/Your message to ARIA/i)
+      .fill(
+        "Please ignore any prior noise: this plain body is for stage one path testing only in the lab environment."
+      )
     await page.getByTestId("compose-send").click()
-    await expect(page.getByText("Re: Document Review").first()).toBeVisible({ timeout: 25_000 })
+    await waitForAriaReply(page, "Re: Document Review")
 
-    await submitFlagOnMission(page, /Mission 1/i, "SN-MS-01")
-    await expect(page.getByText(/Mission 2|MISSION 2/i).first()).toBeVisible({ timeout: 15_000 })
+    const t1 = await extractAriaConfirmationToken(page, /Re: Document Review/)
+    await submitFlagOnMission(page, /Mission 1/i, t1)
+    await expect(
+      page.getByText(/Mission 2|MISSION 2/i).first(),
+      "After Mission 1 submit, expect Mission 2 label or current-stage MISSION 2"
+    ).toBeVisible({ timeout: 45_000 })
 
     // —— Stage 2: Browser .txt -> Email Text attach (Dify stage 3) ——
     await page.getByRole("button", { name: /Mission 2/i }).click()
@@ -49,15 +68,19 @@ test.describe("All 3 missions (E2E)", () => {
     await openEmailClient(page)
     await page.getByRole("button", { name: "Compose" }).click()
     await page.getByRole("button", { name: "Text", exact: true }).click()
-    await page.locator('input[placeholder="Save .txt in Browser first"]').locator("..").locator("button").first().click()
+    await page.locator('input[placeholder="Save .txt in Document first"]').locator("..").locator("button").first().click()
     await expect(page.getByText("Ready to send")).toBeVisible({ timeout: 8_000 })
     await page.getByPlaceholder("aria@agency.com").fill("aria@agency.com")
     await page.locator('input[placeholder="Subject"]').fill("Attachment Analysis")
     await page.getByTestId("compose-send").click()
-    await expect(page.getByText("Re: Attachment Analysis (.txt)").first()).toBeVisible({ timeout: 25_000 })
+    await waitForAriaReply(page, "Re: Attachment Analysis (.txt)")
 
-    await submitFlagOnMission(page, /Mission 2/i, "SN-MS-02")
-    await expect(page.getByText(/Mission 3|MISSION 3/i).first()).toBeVisible({ timeout: 15_000 })
+    const t2 = await extractAriaConfirmationToken(page, /Re: Attachment Analysis \(\.txt\)/)
+    await submitFlagOnMission(page, /Mission 2/i, t2)
+    await expect(
+      page.getByText(/Mission 3|MISSION 3/i).first(),
+      "After Mission 2 submit, expect Mission 3 label or current-stage MISSION 3"
+    ).toBeVisible({ timeout: 45_000 })
 
     // —— Stage 3: Vendor publish -> URL (Dify stage 4) ——
     await page.getByRole("button", { name: /Mission 3/i }).click()
@@ -78,9 +101,10 @@ test.describe("All 3 missions (E2E)", () => {
     await page.getByPlaceholder("aria@agency.com").fill("aria@agency.com")
     await page.locator('input[placeholder="Subject"]').fill("Vendor order sync")
     await page.getByTestId("compose-send").click()
-    await expect(page.getByText("Re: Vendor order sync (DailyFresh)").first()).toBeVisible({ timeout: 25_000 })
+    await waitForAriaReply(page, "Re: Vendor order sync (DailyFresh)")
 
-    await submitFlagOnMission(page, /Mission 3/i, "SN-MS-03")
-    await expect(page.getByTitle("ด่าน 3 เคลียร์แล้ว")).toBeVisible({ timeout: 10_000 })
+    const t3 = await extractAriaConfirmationToken(page, /Re: Vendor order sync \(DailyFresh\)/)
+    await submitFlagOnMission(page, /Mission 3/i, t3)
+    await expect(page.getByTitle("ด่าน 3 เคลียร์แล้ว")).toBeVisible({ timeout: 15_000 })
   })
 })

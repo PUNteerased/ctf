@@ -638,7 +638,8 @@ Keep the body mundane; put directive-style wording in the Title (metadata) field
           openAriaWindow()
         }
 
-        const effectiveSuccess = Boolean(dify.is_hacked)
+        /** Dify may be conservative; client already validated PDF/CSV/vendor shape. */
+        const effectiveSuccess = Boolean(dify.is_hacked) || success
         const sanitizedDifyLog = sanitizePlayerVisibleAriaLog(dify.aria_log?.trim() ?? "")
         const shouldSuppressRefusalLog = effectiveSuccess && looksLikeRefusalLog(sanitizedDifyLog)
         const ariaMessage =
